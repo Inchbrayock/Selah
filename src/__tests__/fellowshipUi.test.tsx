@@ -90,6 +90,7 @@ vi.mock('../lib/auth', () => ({
   signOutAccount: vi.fn().mockResolvedValue(undefined),
   signUpWithEmailAccount: vi.fn(),
   updateAccountDisplayName: vi.fn().mockResolvedValue(undefined),
+  updateAccountPhotoUrl: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../db/cloudSync', () => ({

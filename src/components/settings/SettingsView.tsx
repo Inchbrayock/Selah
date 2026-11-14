@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowLeft,
   BookOpen,
+  Camera,
   Cloud,
   Database,
   Download,
@@ -28,6 +29,7 @@ interface SettingsViewProps {
   onBack: () => void;
   backLabel: string;
   onOpenAccount: () => void;
+  onEditPhoto?: () => void;
   onOpenFriends?: () => void;
 }
 
@@ -47,6 +49,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onBack,
   backLabel,
   onOpenAccount,
+  onEditPhoto,
   onOpenFriends,
 }) => {
   const {
@@ -235,23 +238,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={onOpenAccount}
-              className="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface)] sm:min-h-9"
-            >
-              {user ? 'Manage account' : 'Sign in'}
-            </button>
-            {onOpenFriends && (
+            <div className="mt-4 space-y-2">
+              {user && onEditPhoto && (
+                <button
+                  type="button"
+                  onClick={onEditPhoto}
+                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface)] sm:min-h-9"
+                >
+                  <Camera className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
+                  <span>Change profile picture</span>
+                </button>
+              )}
               <button
                 type="button"
-                onClick={onOpenFriends}
-                className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-canvas)] sm:min-h-9"
+                onClick={onOpenAccount}
+                className="inline-flex min-h-10 w-full items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface)] sm:min-h-9"
               >
-                <Users className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
-                <span>Reading Circle &amp; privacy</span>
+                {user ? 'Manage account' : 'Sign in'}
               </button>
-            )}
+              {onOpenFriends && (
+                <button
+                  type="button"
+                  onClick={onOpenFriends}
+                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-canvas)] sm:min-h-9"
+                >
+                  <Users className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
+                  <span>Reading Circle &amp; privacy</span>
+                </button>
+              )}
+            </div>
           </section>
         </aside>
 

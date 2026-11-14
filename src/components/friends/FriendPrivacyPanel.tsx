@@ -37,7 +37,7 @@ const GRANULAR_TOGGLES: {
   {
     key: 'showPhoto',
     label: 'Profile photo',
-    detail: 'Display your Google profile photo instead of a monogram.',
+    detail: 'Display your chosen profile portrait instead of a monogram.',
   },
 ];
 

@@ -179,10 +179,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   {item.id === 'achievements' && unlockedCount > 0 ? (
                     <motion.span
                       key={unlockedCount}
+                      data-testid="nav-seals-count"
                       initial={{ scale: 0.72 }}
                       animate={{ scale: 1 }}
                       transition={SPRING_SEAL}
-                      className="absolute top-1 right-[calc(50%-1.45rem)] rounded-full bg-[var(--color-accent-soft)] px-1.5 py-0.5 text-[0.58rem] font-semibold leading-none text-[var(--color-accent)] ring-2 ring-[var(--bg-elevated)] tabular-nums lg:static lg:rounded lg:text-[0.7rem] lg:ring-0"
+                      className="hidden lg:inline-block lg:rounded lg:bg-[var(--color-accent-soft)] lg:px-1.5 lg:py-0.5 lg:text-[0.7rem] lg:font-semibold lg:leading-none lg:text-[var(--color-accent)] lg:tabular-nums"
                     >
                       {unlockedCount}
                     </motion.span>

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertCircle,
+  Camera,
   Check,
   ChevronRight,
   Cloud,
@@ -23,6 +24,7 @@ interface AccountDialogProps {
   open: boolean;
   onClose: () => void;
   onOpenSettings?: () => void;
+  onEditPhoto?: () => void;
   anchorRef?: React.RefObject<HTMLElement | null>;
 }
 
@@ -92,6 +94,7 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
   open,
   onClose,
   onOpenSettings,
+  onEditPhoto,
   anchorRef,
 }) => {
   const {
@@ -372,7 +375,37 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
             <>
               {/* Profile Card */}
               <div className="flex items-start gap-3.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-4">
-                <ProfileAvatar user={user} sizeClassName="h-11 w-11" textClassName="text-base" />
+                {onEditPhoto ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onEditPhoto();
+                    }}
+                    aria-label="Change profile picture"
+                    className="group flex shrink-0 flex-col items-center gap-1 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]"
+                  >
+                    <span className="relative">
+                      <ProfileAvatar
+                        user={user}
+                        sizeClassName="h-12 w-12"
+                        textClassName="text-base"
+                        interactive
+                      />
+                      <span
+                        aria-hidden="true"
+                        className="absolute -right-0.5 -bottom-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-xs transition-colors group-hover:border-[var(--color-accent)] group-hover:text-[var(--color-accent)]"
+                      >
+                        <Camera className="h-2.5 w-2.5" />
+                      </span>
+                    </span>
+                    <span className="text-[0.65rem] font-medium text-[var(--text-secondary)] transition-colors group-hover:text-[var(--color-accent)]">
+                      Change
+                    </span>
+                  </button>
+                ) : (
+                  <ProfileAvatar user={user} sizeClassName="h-11 w-11" textClassName="text-base" />
+                )}
 
                 <div className="min-w-0 flex-1">
                   {editingName ? (

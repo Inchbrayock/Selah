@@ -4,6 +4,7 @@ import { AchievementModal } from './components/achievements/AchievementModal';
 import { AchievementsView } from './components/achievements/AchievementsView';
 import { AccountDialog } from './components/auth/AccountDialog';
 import { MergeBanner } from './components/auth/MergeBanner';
+import { ProfilePhotoDialog } from './components/auth/ProfilePhotoDialog';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { FriendsView } from './components/friends/FriendsView';
 import { JournalView } from './components/journal/JournalView';
@@ -57,6 +58,7 @@ const SanctuaryAppContent: React.FC = () => {
     isNew: boolean;
   } | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [photoEditorOpen, setPhotoEditorOpen] = useState(false);
   const accountAnchorRef = useRef<HTMLButtonElement | null>(null);
 
   const navigateToTab = useCallback(
@@ -77,12 +79,14 @@ const SanctuaryAppContent: React.FC = () => {
 
   const backStateRef = useRef({
     inspectedAchievement,
+    photoEditorOpen,
     accountOpen,
     openBookId,
     activeTab,
   });
   backStateRef.current = {
     inspectedAchievement,
+    photoEditorOpen,
     accountOpen,
     openBookId,
     activeTab,
@@ -95,8 +99,18 @@ const SanctuaryAppContent: React.FC = () => {
   }, [ready]);
 
   useEffect(() => {
+    if (!user) {
+      setPhotoEditorOpen(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
     return subscribeNativeBackButton(() => {
       const state = backStateRef.current;
+      if (state.photoEditorOpen) {
+        setPhotoEditorOpen(false);
+        return true;
+      }
       if (state.inspectedAchievement !== null) {
         setInspectedAchievement(null);
         return true;
@@ -194,6 +208,7 @@ const SanctuaryAppContent: React.FC = () => {
                   onBack={() => navigateToTab(returnTab)}
                   backLabel={PRIMARY_TAB_LABELS[returnTab]}
                   onOpenAccount={() => setAccountOpen(true)}
+                  onEditPhoto={() => setPhotoEditorOpen(true)}
                   onOpenFriends={() => navigateToTab('friends')}
                 />
               )}
@@ -234,7 +249,13 @@ const SanctuaryAppContent: React.FC = () => {
         open={accountOpen}
         onClose={() => setAccountOpen(false)}
         onOpenSettings={() => navigateToTab('settings')}
+        onEditPhoto={() => setPhotoEditorOpen(true)}
         anchorRef={accountAnchorRef}
+      />
+
+      <ProfilePhotoDialog
+        open={photoEditorOpen && Boolean(user)}
+        onClose={() => setPhotoEditorOpen(false)}
       />
 
       <CelebrationToast

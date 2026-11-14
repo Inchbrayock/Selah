@@ -18,6 +18,7 @@ export interface AccountUser {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
+  providerPhotoURL?: string | null;
   emailVerified: boolean;
   providerIds: string[];
 }
@@ -27,11 +28,16 @@ export function isAuthAvailable(): boolean {
 }
 
 export function toAccountUser(user: User): AccountUser {
+  const providerPhotoURL =
+    user.providerData?.find((p) => typeof p?.photoURL === 'string' && p.photoURL.startsWith('https://'))
+      ?.photoURL ?? null;
+
   return {
     uid: user.uid,
     email: user.email,
     displayName: user.displayName,
     photoURL: user.photoURL,
+    providerPhotoURL,
     emailVerified: user.emailVerified,
     providerIds: user.providerData.map((p) => p.providerId),
   };
@@ -118,6 +124,23 @@ export async function updateAccountDisplayName(displayName: string): Promise<Acc
   return {
     ...toAccountUser(services.auth.currentUser),
     displayName: trimmed || null,
+  };
+}
+
+export async function updateAccountPhotoUrl(photoURL: string | null): Promise<AccountUser> {
+  const services = getFirebaseServices();
+  if (!services || !services.auth.currentUser) {
+    throw new Error('You must be signed in to update your profile picture.');
+  }
+  const cleanPhotoUrl =
+    typeof photoURL === 'string' && photoURL.trim() ? photoURL.trim().slice(0, 1000) : null;
+  if (cleanPhotoUrl && !cleanPhotoUrl.startsWith('https://')) {
+    throw new Error('Cloud profile picture links must start with https://.');
+  }
+  await updateProfile(services.auth.currentUser, { photoURL: cleanPhotoUrl ?? '' });
+  return {
+    ...toAccountUser(services.auth.currentUser),
+    photoURL: cleanPhotoUrl,
   };
 }
 

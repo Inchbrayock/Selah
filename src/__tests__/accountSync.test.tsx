@@ -131,6 +131,12 @@ vi.mock('../lib/auth', () => ({
     const updated = { ...current, displayName: displayName.trim() || null };
     return updated;
   }),
+  updateAccountPhotoUrl: vi.fn(async (photoURL: string | null) => {
+    const current = mockState.getCurrentUser();
+    if (!current) throw new Error('Not signed in');
+    const updated = { ...current, photoURL };
+    return updated;
+  }),
   sendAccountPasswordReset: vi.fn(async () => {}),
   signOutAccount: vi.fn(async () => {
     mockState.setCurrentUser(null);
@@ -288,7 +294,8 @@ vi.mock('../db/cloudSync', () => ({
 }));
 
 import { App } from '../App';
-import { signInWithGoogleAccount } from '../lib/auth';
+import { getSanctuaryEmblemUrl, readLocalAvatarDataUrl } from '../lib/avatar';
+import { signInWithGoogleAccount, updateAccountPhotoUrl } from '../lib/auth';
 
 function getWholeBibleChapterReadout(chaptersRead: number) {
   return screen.getByText(
@@ -734,6 +741,200 @@ describe('Firebase Account & Cloud Sync', () => {
 
     if (defaultImpl) {
       cloudSpies.saveCloudPreferences.mockImplementation(defaultImpl);
+    }
+  }, 15000);
+
+  it('changes profile picture via Sanctuary seals, custom HTTPS links, Settings entry, and resets to Google photo or initials', async () => {
+    window.localStorage.clear();
+    render(<App />);
+    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+
+    await act(async () => {
+      mockState.setCurrentUser({
+        uid: 'avatar-uid-1',
+        email: 'grace@selah.app',
+        displayName: 'Grace Reader',
+        photoURL: 'https://example.com/google-grace.jpg',
+        providerPhotoURL: 'https://example.com/google-grace.jpg',
+        emailVerified: true,
+        providerIds: ['google.com'],
+      });
+    });
+
+    const accountBtn = await screen.findByRole('button', {
+      name: /Open account and cloud sync/i,
+    });
+    expect(accountBtn.querySelector('img')?.getAttribute('src')).toBe(
+      'https://example.com/google-grace.jpg'
+    );
+
+    // 1. Open studio from Account Popover and select a Sanctuary seal
+    fireEvent.click(accountBtn);
+    const popover = await screen.findByTestId('account-popover');
+    fireEvent.click(within(popover).getByRole('button', { name: /Change profile picture/i }));
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: /^Profile picture$/i })
+    ).toBeInTheDocument();
+
+    const oliveRadio = screen.getByRole('radio', { name: /Olive Branch/i });
+    fireEvent.click(oliveRadio);
+    expect(oliveRadio).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('button', { name: /Save portrait/i }));
+
+    await waitFor(() => {
+      expect(vi.mocked(updateAccountPhotoUrl)).toHaveBeenCalledWith(
+        getSanctuaryEmblemUrl('olive')
+      );
+      expect(accountBtn.querySelector('[data-emblem-id="olive"]')).not.toBeNull();
+    });
+
+    // 2. Navigate to Settings -> Change profile picture -> try invalid & valid HTTPS URL
+    fireEvent.click(accountBtn);
+    fireEvent.click(await screen.findByRole('button', { name: /Settings/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Change profile picture/i }));
+
+    fireEvent.click(await screen.findByRole('button', { name: /Use an image link instead/i }));
+    const urlInput = screen.getByLabelText(/Direct HTTPS image URL/i);
+    fireEvent.change(urlInput, { target: { value: 'http://insecure.example.com/a.jpg' } });
+    fireEvent.click(screen.getByRole('button', { name: /Preview link/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /Image links must start with https:\/\//i
+    );
+
+    fireEvent.change(urlInput, { target: { value: 'https://cdn.example.com/portrait.webp' } });
+    fireEvent.click(screen.getByRole('button', { name: /Preview link/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save portrait/i }));
+
+    await waitFor(() => {
+      expect(vi.mocked(updateAccountPhotoUrl)).toHaveBeenLastCalledWith(
+        'https://cdn.example.com/portrait.webp'
+      );
+      expect(accountBtn.querySelector('img')?.getAttribute('src')).toBe(
+        'https://cdn.example.com/portrait.webp'
+      );
+    });
+    expect(readLocalAvatarDataUrl('avatar-uid-1')).toBeNull();
+
+    // 3. Open again from Settings, restore Google photo, and verify monogram fallback via Remove
+    fireEvent.click(screen.getByRole('button', { name: /Change profile picture/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Use Google photo/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save portrait/i }));
+
+    await waitFor(() => {
+      expect(vi.mocked(updateAccountPhotoUrl)).toHaveBeenLastCalledWith(
+        'https://example.com/google-grace.jpg'
+      );
+      expect(accountBtn.querySelector('img')?.getAttribute('src')).toBe(
+        'https://example.com/google-grace.jpg'
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Change profile picture/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Use initials/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save portrait/i }));
+
+    await waitFor(() => {
+      expect(vi.mocked(updateAccountPhotoUrl)).toHaveBeenLastCalledWith(null);
+      expect(accountBtn.querySelector('img')).toBeNull();
+      expect(accountBtn.textContent).toBe('GR');
+    });
+  }, 20000);
+
+  it('frames an uploaded device photo cleanly and persists it locally across auth hydration', async () => {
+    window.localStorage.clear();
+    const origFileReader = globalThis.FileReader;
+    const origImage = globalThis.Image;
+    const origCreateElement = document.createElement.bind(document);
+
+    class MockFileReader {
+      result: string | ArrayBuffer | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      readAsDataURL() {
+        this.result = 'data:image/png;base64,aGVsbG8=';
+        this.onload?.();
+      }
+    }
+
+    class MockImage {
+      naturalWidth = 320;
+      naturalHeight = 240;
+      width = 320;
+      height = 240;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+
+    const fakeCtx = {
+      imageSmoothingEnabled: false,
+      imageSmoothingQuality: 'low',
+      fillStyle: '',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+
+    const croppedJpeg = 'data:image/jpeg;base64,/9j/croppedOk==';
+    globalThis.FileReader = MockFileReader as unknown as typeof FileReader;
+    globalThis.Image = MockImage as unknown as typeof Image;
+    const createSpy = vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      if (tag === 'canvas') {
+        return {
+          width: 0,
+          height: 0,
+          getContext: () => fakeCtx,
+          toDataURL: () => croppedJpeg,
+        } as unknown as HTMLCanvasElement;
+      }
+      return origCreateElement(tag);
+    }) as typeof document.createElement);
+
+    try {
+      render(<App />);
+      expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+
+      await act(async () => {
+        mockState.setCurrentUser({
+          uid: 'upload-uid-1',
+          email: 'upload@selah.app',
+          displayName: 'Miriam',
+          photoURL: null,
+          emailVerified: true,
+          providerIds: ['password'],
+        });
+      });
+
+      const accountBtn = await screen.findByRole('button', {
+        name: /Open account and cloud sync/i,
+      });
+      fireEvent.click(accountBtn);
+      fireEvent.click(await screen.findByRole('button', { name: /Change profile picture/i }));
+
+      const fileInput = screen.getByLabelText(/Choose photo file/i) as HTMLInputElement;
+      const sampleFile = new File(['abc'], 'portrait.png', { type: 'image/png' });
+      fireEvent.change(fileInput, { target: { files: [sampleFile] } });
+
+      expect(
+        await screen.findByRole('application', { name: /Portrait crop viewfinder/i })
+      ).toBeInTheDocument();
+      const zoomSlider = screen.getByLabelText(/Zoom/i);
+      fireEvent.change(zoomSlider, { target: { value: '1.5' } });
+      expect(screen.getByText('1.5×')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /Apply framing/i }));
+      fireEvent.click(screen.getByRole('button', { name: /Save portrait/i }));
+
+      await waitFor(() => {
+        expect(readLocalAvatarDataUrl('upload-uid-1')).toBe(croppedJpeg);
+        expect(accountBtn.querySelector('img')?.getAttribute('src')).toBe(croppedJpeg);
+      });
+    } finally {
+      createSpy.mockRestore();
+      globalThis.FileReader = origFileReader;
+      globalThis.Image = origImage;
     }
   }, 15000);
 });

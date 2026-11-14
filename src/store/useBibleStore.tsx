@@ -85,8 +85,10 @@ import {
   signUpWithEmailAccount,
   subscribeToAuthState,
   updateAccountDisplayName,
+  updateAccountPhotoUrl,
   type AccountUser,
 } from '../lib/auth';
+import { resolveEffectiveAccountUser, writeLocalAvatarDataUrl } from '../lib/avatar';
 import { celebrateAchievementUnlocked, celebrateBookCompleted } from '../lib/celebration';
 import {
   computeSectionsChapterCount,
@@ -221,6 +223,11 @@ interface BibleStoreValue {
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string, displayName?: string) => Promise<void>;
   updateDisplayName: (displayName: string) => Promise<void>;
+  updateProfilePhoto: (
+    choice:
+      | { kind: 'cloud'; photoURL: string | null }
+      | { kind: 'local'; dataUrl: string }
+  ) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
   resolveGuestMerge: (strategy: 'merge' | 'cloud-only') => Promise<void>;
@@ -999,8 +1006,9 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           return;
         }
 
-        setUser(nextUser);
-        userRef.current = nextUser;
+        const resolvedUser = resolveEffectiveAccountUser(nextUser) ?? nextUser;
+        setUser(resolvedUser);
+        userRef.current = resolvedUser;
         setAuthLoading(false);
         setSyncStatus('syncing');
         setSyncError(null);
@@ -1671,49 +1679,101 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     []
   );
 
+  const syncOwnFriendProfileAfterUpdate = useCallback(
+    (updatedUser: AccountUser, syncCodeName: boolean) => {
+      if (!ownFriendProfileRef.current) return;
+      const currentSummary = computeBibleProgress(logsRef.current, {
+        streakGraceEnabled: prefsRef.current.streakGraceEnabled,
+      });
+      const currentAchievements = evaluateAchievements(logsRef.current, currentSummary);
+      const currentAllPlans = getAllReadingPlans(
+        customPlansRef.current.map((def) => materializeCustomPlan(def))
+      );
+      void publishOwnFriendStats({
+        user: updatedUser,
+        friendCode: ownFriendProfileRef.current.friendCode,
+        summary: currentSummary,
+        achievements: currentAchievements,
+        preferences: prefsRef.current,
+        allPlans: currentAllPlans,
+        syncCodeName,
+      })
+        .then((published) => {
+          if (published) {
+            ownFriendProfileRef.current = published;
+            setOwnFriendProfile(published);
+            lastPublishedFriendSigRef.current = computeFriendStatsSignature(published);
+            persistCurrentFriendCache(
+              updatedUser.uid,
+              published,
+              friendshipsRef.current,
+              friendProfilesRef.current
+            );
+          }
+        })
+        .catch(() => {});
+    },
+    [persistCurrentFriendCache]
+  );
+
   const updateDisplayName = useCallback(async (displayName: string) => {
     try {
       const updated = await updateAccountDisplayName(displayName);
-      setUser(updated);
-      userRef.current = updated;
-      await saveCloudDisplayName(updated.uid, updated.displayName ?? '');
-      if (ownFriendProfileRef.current) {
-        const currentSummary = computeBibleProgress(logsRef.current, {
-          streakGraceEnabled: prefsRef.current.streakGraceEnabled,
-        });
-        const currentAchievements = evaluateAchievements(logsRef.current, currentSummary);
-        const currentAllPlans = getAllReadingPlans(
-          customPlansRef.current.map((def) => materializeCustomPlan(def))
-        );
-        void publishOwnFriendStats({
-          user: updated,
-          friendCode: ownFriendProfileRef.current.friendCode,
-          summary: currentSummary,
-          achievements: currentAchievements,
-          preferences: prefsRef.current,
-          allPlans: currentAllPlans,
-          syncCodeName: true,
-        })
-          .then((published) => {
-            if (published) {
-              ownFriendProfileRef.current = published;
-              setOwnFriendProfile(published);
-              lastPublishedFriendSigRef.current = computeFriendStatsSignature(published);
-              persistCurrentFriendCache(
-                updated.uid,
-                published,
-                friendshipsRef.current,
-                friendProfilesRef.current
-              );
-            }
-          })
-          .catch(() => {});
-      }
+      const nextUser = resolveEffectiveAccountUser(updated) ?? updated;
+      setUser(nextUser);
+      userRef.current = nextUser;
+      await saveCloudDisplayName(nextUser.uid, nextUser.displayName ?? '');
+      syncOwnFriendProfileAfterUpdate(nextUser, true);
       setAnnouncement('Updated account display name.');
     } catch (err) {
       throw new Error(formatAuthError(err));
     }
-  }, [persistCurrentFriendCache]);
+  }, [syncOwnFriendProfileAfterUpdate]);
+
+  const updateProfilePhoto = useCallback(
+    async (
+      choice:
+        | { kind: 'cloud'; photoURL: string | null }
+        | { kind: 'local'; dataUrl: string }
+    ) => {
+      const current = userRef.current;
+      if (!current) {
+        throw new Error('You must be signed in to update your profile picture.');
+      }
+
+      if (choice.kind === 'local') {
+        writeLocalAvatarDataUrl(current.uid, choice.dataUrl);
+        const nextUser: AccountUser = {
+          ...current,
+          photoURL: choice.dataUrl,
+        };
+        setUser(nextUser);
+        userRef.current = nextUser;
+        setAnnouncement('Updated profile picture on this device.');
+        return;
+      }
+
+      try {
+        const updated = await updateAccountPhotoUrl(choice.photoURL);
+        writeLocalAvatarDataUrl(current.uid, null);
+        const nextUser: AccountUser = {
+          ...current,
+          ...updated,
+          photoURL: choice.photoURL,
+          providerPhotoURL: updated.providerPhotoURL ?? current.providerPhotoURL ?? null,
+        };
+        setUser(nextUser);
+        userRef.current = nextUser;
+        syncOwnFriendProfileAfterUpdate(nextUser, false);
+        setAnnouncement(
+          choice.photoURL ? 'Updated profile picture.' : 'Removed profile picture.'
+        );
+      } catch (err) {
+        throw new Error(formatAuthError(err));
+      }
+    },
+    [syncOwnFriendProfileAfterUpdate]
+  );
 
   const sendPasswordReset = useCallback(async (email: string) => {
     try {
@@ -2678,6 +2738,7 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     signInWithEmail,
     signUpWithEmail,
     updateDisplayName,
+    updateProfilePhoto,
     sendPasswordReset,
     signOut,
     resolveGuestMerge,

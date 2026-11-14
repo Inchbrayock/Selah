@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { parseSanctuaryEmblemUrl } from '../../lib/avatar';
 import type { AccountUser } from '../../lib/auth';
+import { SanctuaryEmblemArtwork } from './SanctuaryEmblemArtwork';
 
 /** Derive up to two monogram initials from a display name or email address. */
 export function getAccountInitials(displayName: string | null, email: string | null): string {
@@ -18,7 +20,7 @@ interface ProfileAvatarProps {
   interactive?: boolean;
 }
 
-/** Circular user profile picture with automatic serif-monogram fallback when no photo loads. */
+/** Circular user profile picture with Sanctuary emblem and serif-monogram fallback support. */
 export const ProfileAvatar: React.FC<ProfileAvatarProps> = ({
   user,
   sizeClassName = 'h-9 w-9',
@@ -31,14 +33,30 @@ export const ProfileAvatar: React.FC<ProfileAvatarProps> = ({
     setFailedUrl(null);
   }, [user.photoURL]);
 
+  const emblem = parseSanctuaryEmblemUrl(user.photoURL);
+  if (emblem) {
+    return (
+      <span
+        data-emblem-id={emblem.id}
+        aria-hidden="true"
+        className={`block ${sizeClassName} shrink-0 overflow-hidden rounded-full border border-[var(--border-subtle)] transition-colors ${
+          interactive ? 'group-hover:border-[var(--border-strong)]' : ''
+        }`}
+      >
+        <SanctuaryEmblemArtwork emblem={emblem} />
+      </span>
+    );
+  }
+
   const showImage = Boolean(user.photoURL) && failedUrl !== user.photoURL;
 
   if (showImage && user.photoURL) {
+    const isDataUrl = user.photoURL.startsWith('data:');
     return (
       <img
         src={user.photoURL}
         alt=""
-        referrerPolicy="no-referrer"
+        referrerPolicy={isDataUrl ? undefined : 'no-referrer'}
         onError={() => setFailedUrl(user.photoURL)}
         className={`${sizeClassName} shrink-0 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] object-cover transition-colors ${
           interactive ? 'group-hover:border-[var(--border-strong)]' : ''

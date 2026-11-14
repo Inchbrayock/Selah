@@ -97,6 +97,13 @@ describe('Selah Bible Sanctuary App UI', () => {
 
     expect(await screen.findByText(/^Open the Scroll$/i)).toBeInTheDocument();
 
+    // Unlocked seals count stays hidden in the mobile/tablet bottom nav bar
+    const navSealsCount = screen.getByTestId('nav-seals-count');
+    expect(navSealsCount).toHaveTextContent('1');
+    expect(navSealsCount.className).toContain('hidden');
+    expect(navSealsCount.className).toContain('lg:inline-block');
+    expect(navSealsCount.className).not.toContain('top-1');
+
     fireEvent.click(screen.getByRole('button', { name: /Open John chapter grid/i }));
     expect(await screen.findByRole('heading', { name: 'John' })).toBeInTheDocument();
 
