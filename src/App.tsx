@@ -5,6 +5,7 @@ import { AchievementsView } from './components/achievements/AchievementsView';
 import { AccountDialog } from './components/auth/AccountDialog';
 import { MergeBanner } from './components/auth/MergeBanner';
 import { DashboardView } from './components/dashboard/DashboardView';
+import { FriendsView } from './components/friends/FriendsView';
 import { JournalView } from './components/journal/JournalView';
 import { BookDetailDialog } from './components/library/BookDetailDialog';
 import { LibraryView } from './components/library/LibraryView';
@@ -31,6 +32,7 @@ const TAB_TITLES: Record<AppTab, string> = {
   achievements: 'Hall of Seals | Selah',
   journal: 'Journal & Plans | Selah',
   settings: 'Settings | Selah',
+  friends: 'Reading Circle | Selah',
 };
 
 const SanctuaryAppContent: React.FC = () => {
@@ -39,6 +41,7 @@ const SanctuaryAppContent: React.FC = () => {
     user,
     announcement,
     unlockedQueue,
+    pendingInviteCode,
     dismissUnlockedAchievement,
   } = useBibleStore();
 
@@ -58,7 +61,7 @@ const SanctuaryAppContent: React.FC = () => {
 
   const navigateToTab = useCallback(
     (nextTab: AppTab, options?: { journalSubTab?: 'journal' | 'plans' }) => {
-      if (nextTab === 'settings') {
+      if (nextTab === 'settings' || nextTab === 'friends') {
         setOpenBookId(null);
       } else {
         setReturnTab(nextTab);
@@ -106,7 +109,7 @@ const SanctuaryAppContent: React.FC = () => {
         setOpenBookId(null);
         return true;
       }
-      if (state.activeTab === 'settings') {
+      if (state.activeTab === 'settings' || state.activeTab === 'friends') {
         navigateToTab(returnTabRef.current);
         return true;
       }
@@ -117,6 +120,12 @@ const SanctuaryAppContent: React.FC = () => {
       return false;
     });
   }, [navigateToTab]);
+
+  useEffect(() => {
+    if (pendingInviteCode) {
+      navigateToTab('friends');
+    }
+  }, [pendingInviteCode, navigateToTab]);
 
   useEffect(() => {
     document.title = TAB_TITLES[activeTab];
@@ -166,6 +175,7 @@ const SanctuaryAppContent: React.FC = () => {
                     setInspectedAchievement({ status, isNew: false })
                   }
                   onNavigateTab={(tab, options) => navigateToTab(tab, options)}
+                  onOpenFriends={() => navigateToTab('friends')}
                 />
               )}
               {activeTab === 'library' && <LibraryView onOpenBook={setOpenBookId} />}
@@ -181,6 +191,14 @@ const SanctuaryAppContent: React.FC = () => {
               )}
               {activeTab === 'settings' && (
                 <SettingsView
+                  onBack={() => navigateToTab(returnTab)}
+                  backLabel={PRIMARY_TAB_LABELS[returnTab]}
+                  onOpenAccount={() => setAccountOpen(true)}
+                  onOpenFriends={() => navigateToTab('friends')}
+                />
+              )}
+              {activeTab === 'friends' && (
+                <FriendsView
                   onBack={() => navigateToTab(returnTab)}
                   backLabel={PRIMARY_TAB_LABELS[returnTab]}
                   onOpenAccount={() => setAccountOpen(true)}

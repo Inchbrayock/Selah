@@ -1,6 +1,8 @@
 import Dexie, { type Table } from 'dexie';
 import type {
   CustomPlanDefinition,
+  FriendProfile,
+  FriendshipRecord,
   ReadingLogEntry,
   UserPreferences,
 } from '../types/bible';
@@ -10,10 +12,19 @@ export interface StoredPreferencesRow {
   value: UserPreferences;
 }
 
+export interface StoredFriendCacheRow {
+  ownerUid: string;
+  ownProfile: FriendProfile | null;
+  friendships: FriendshipRecord[];
+  profilesByUid: Record<string, FriendProfile>;
+  updatedAt: string;
+}
+
 class SelahDatabase extends Dexie {
   readingLogs!: Table<ReadingLogEntry, string>;
   preferences!: Table<StoredPreferencesRow, string>;
   customPlans!: Table<CustomPlanDefinition, string>;
+  friendCache!: Table<StoredFriendCacheRow, string>;
 
   constructor() {
     super('selah-scripture-sanctuary-db');
@@ -25,6 +36,12 @@ class SelahDatabase extends Dexie {
       readingLogs: 'id, bookId, readDate, loggedAt',
       preferences: 'key',
       customPlans: 'id, updatedAt',
+    });
+    this.version(3).stores({
+      readingLogs: 'id, bookId, readDate, loggedAt',
+      preferences: 'key',
+      customPlans: 'id, updatedAt',
+      friendCache: 'ownerUid',
     });
   }
 }

@@ -1,13 +1,13 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Award, BookOpen, Compass, ScrollText, User } from 'lucide-react';
+import { Award, BookOpen, Compass, ScrollText, User, Users } from 'lucide-react';
 import { SPRING_DOCK, SPRING_SEAL, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
 import { type CloudSyncStatus, useBibleStore } from '../../store/useBibleStore';
 import { ProfileAvatar } from './ProfileAvatar';
 import { SanctuaryLamp } from './SanctuaryLamp';
 
 export type PrimaryTab = 'dashboard' | 'library' | 'achievements' | 'journal';
-export type AppTab = PrimaryTab | 'settings';
+export type AppTab = PrimaryTab | 'settings' | 'friends';
 
 interface AppHeaderProps {
   activeTab: AppTab;
@@ -44,7 +44,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   accountOpen = false,
   accountButtonRef,
 }) => {
-  const { summary, achievements, user, authLoading, syncStatus } = useBibleStore();
+  const { summary, achievements, user, authLoading, syncStatus, incomingRequests } = useBibleStore();
   const unlockedCount = achievements.filter((a) => a.unlocked).length;
   const hasStreak = summary.currentStreak > 0;
   const activeIndex = NAV_ITEMS.findIndex((item) => item.id === activeTab);
@@ -53,7 +53,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   const [underline, setUnderline] = useState<{ left: number; width: number } | null>(null);
 
   const measureDesktopUnderline = useCallback(() => {
-    if (activeTab === 'settings') {
+    if (activeTab === 'settings' || activeTab === 'friends') {
       setUnderline(null);
       return;
     }
@@ -195,6 +195,34 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
         {/* Actions */}
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 lg:py-3">
+          <motion.button
+            type="button"
+            whileTap={TACTILE_TAP}
+            onClick={() => onSelectTab('friends')}
+            title="Reading Circle"
+            aria-current={activeTab === 'friends' ? 'page' : undefined}
+            aria-label={
+              incomingRequests.length > 0
+                ? `Open Reading Circle (${incomingRequests.length} pending ${
+                    incomingRequests.length === 1 ? 'request' : 'requests'
+                  })`
+                : 'Open Reading Circle'
+            }
+            className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors sm:h-9 sm:w-9 ${
+              activeTab === 'friends'
+                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            <Users className="h-4 w-4" aria-hidden="true" />
+            {incomingRequests.length > 0 && (
+              <span
+                aria-hidden="true"
+                className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-[var(--color-accent)] ring-2 ring-[var(--bg-canvas)]"
+              />
+            )}
+          </motion.button>
+
           <motion.button
             ref={accountButtonRef}
             type="button"

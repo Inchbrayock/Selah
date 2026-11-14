@@ -1,8 +1,9 @@
-import { db } from './database';
+import { db, type StoredFriendCacheRow } from './database';
 import { createDemoReadingLogs } from './demoSeed';
 import { CORE_DEFAULT_PLAN_IDS } from '../data/readingPlans';
 import { sanitizeCustomPlanDefinition } from '../lib/customPlans';
 import { todayPlainDate } from '../lib/dates';
+import { DEFAULT_FRIEND_PRIVACY, sanitizeFriendPrivacy } from '../lib/friends';
 import { sanitizeShelfPlanIds } from '../lib/plans';
 import type {
   CustomPlanDefinition,
@@ -17,6 +18,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   activePlanId: 'gospels-acts-45',
   seenAchievementIds: [],
   shelfPlanIds: [...CORE_DEFAULT_PLAN_IDS],
+  friendPrivacy: { ...DEFAULT_FRIEND_PRIVACY },
 };
 
 export function normalizeUserPreferences(
@@ -55,6 +57,7 @@ export function normalizeUserPreferences(
     activePlanId,
     seenAchievementIds,
     shelfPlanIds,
+    friendPrivacy: sanitizeFriendPrivacy(input?.friendPrivacy),
   };
 }
 
@@ -334,13 +337,67 @@ export async function seedDemoSanctuary(): Promise<{
 
 export async function clearAllSanctuaryData(): Promise<void> {
   try {
-    await db.transaction('rw', db.readingLogs, db.preferences, db.customPlans, async () => {
-      await db.readingLogs.clear();
-      await db.preferences.put({ key: 'user', value: { ...DEFAULT_PREFERENCES } });
-      await db.customPlans.clear();
-    });
+    await db.transaction(
+      'rw',
+      db.readingLogs,
+      db.preferences,
+      db.customPlans,
+      db.friendCache,
+      async () => {
+        await db.readingLogs.clear();
+        await db.preferences.put({ key: 'user', value: { ...DEFAULT_PREFERENCES } });
+        await db.customPlans.clear();
+        await db.friendCache.clear();
+      }
+    );
   } catch {
     await writeFallback([], { ...DEFAULT_PREFERENCES }, []);
+  }
+}
+
+const FRIEND_CACHE_FALLBACK_KEY = 'selah-friend-cache-v1';
+
+export async function loadFriendCache(ownerUid: string): Promise<StoredFriendCacheRow | null> {
+  try {
+    const row = await db.friendCache.get(ownerUid);
+    return row ?? null;
+  } catch {
+    try {
+      const raw = localStorage.getItem(`${FRIEND_CACHE_FALLBACK_KEY}:${ownerUid}`);
+      return raw ? (JSON.parse(raw) as StoredFriendCacheRow) : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+export async function saveFriendCache(row: StoredFriendCacheRow): Promise<void> {
+  try {
+    await db.friendCache.put(row);
+  } catch {
+    try {
+      localStorage.setItem(`${FRIEND_CACHE_FALLBACK_KEY}:${row.ownerUid}`, JSON.stringify(row));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
+}
+
+export async function clearFriendCache(ownerUid?: string): Promise<void> {
+  try {
+    if (ownerUid) {
+      await db.friendCache.delete(ownerUid);
+    } else {
+      await db.friendCache.clear();
+    }
+  } catch {
+    if (ownerUid) {
+      try {
+        localStorage.removeItem(`${FRIEND_CACHE_FALLBACK_KEY}:${ownerUid}`);
+      } catch {
+        // Ignore storage errors
+      }
+    }
   }
 }
 

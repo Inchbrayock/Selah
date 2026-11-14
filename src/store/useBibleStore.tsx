@@ -27,6 +27,18 @@ import {
   upsertCloudReadingLog,
 } from '../db/cloudSync';
 import {
+  acceptFriendRequest as acceptCloudFriendRequest,
+  blockUserAndRemoveFriendship,
+  deleteFriendship as deleteCloudFriendship,
+  ensureOwnFriendProfile,
+  lookupFriendByCode as lookupCloudFriendByCode,
+  publishOwnFriendStats,
+  regenerateOwnFriendCode,
+  sendFriendRequest as sendCloudFriendRequest,
+  subscribeFriendProfile,
+  subscribeFriendships,
+} from '../db/friendsSync';
+import {
   addReadingLog,
   buildBackupPayload,
   clearAllSanctuaryData,
@@ -34,6 +46,7 @@ import {
   deleteCustomPlan,
   deleteReadingLog,
   getLocalOwnerUid,
+  loadFriendCache,
   loadSanctuaryState,
   normalizeUserPreferences,
   parseAndValidateBackup,
@@ -41,6 +54,7 @@ import {
   removeChaptersFromBookLogs,
   replaceAllCustomPlans,
   replaceAllLogs,
+  saveFriendCache,
   seedDemoSanctuary,
   setLocalOwnerUid,
   updateReadingLog,
@@ -68,6 +82,14 @@ import {
   sanitizePlanAccentColor,
 } from '../lib/customPlans';
 import { todayPlainDate } from '../lib/dates';
+import {
+  buildFriendProfileStats,
+  computeFriendStatsSignature,
+  extractInviteCodeFromLocation,
+  getFriendCounterpart,
+  sanitizeFriendPrivacy,
+  sanitizeHttpsPhotoUrl,
+} from '../lib/friends';
 import { syncNativeStatusBar, triggerNativeHaptic } from '../lib/nativeShell';
 import {
   getAllReadingPlans,
@@ -87,6 +109,10 @@ import type {
   ColorSchemePreference,
   CustomPlanDefinition,
   CustomPlanSection,
+  FriendCodeLookup,
+  FriendConnection,
+  FriendProfile,
+  FriendshipRecord,
   ReadingLogEntry,
   ReadingPlan,
   UserPreferences,
@@ -171,6 +197,24 @@ interface BibleStoreValue {
   signOut: () => Promise<void>;
   resolveGuestMerge: (strategy: 'merge' | 'cloud-only') => Promise<void>;
   syncNow: () => Promise<void>;
+  ownFriendProfile: FriendProfile | null;
+  friends: FriendConnection[];
+  incomingRequests: FriendshipRecord[];
+  outgoingRequests: FriendshipRecord[];
+  friendsLoading: boolean;
+  friendsError: string | null;
+  friendsFromCache: boolean;
+  pendingInviteCode: string | null;
+  clearPendingInviteCode: () => void;
+  ensureFriendProfileReady: () => Promise<void>;
+  lookupFriendByCode: (rawInput: string) => Promise<FriendCodeLookup | null>;
+  sendFriendRequest: (target: FriendCodeLookup) => Promise<'sent' | 'accepted'>;
+  acceptFriendRequest: (pairId: string) => Promise<void>;
+  declineFriendRequest: (pairId: string) => Promise<void>;
+  cancelFriendRequest: (pairId: string) => Promise<void>;
+  removeFriend: (pairId: string) => Promise<void>;
+  blockFriend: (targetUid: string, displayName: string, pairId?: string) => Promise<void>;
+  regenerateFriendCode: () => Promise<void>;
 }
 
 const BibleStoreContext = createContext<BibleStoreValue | null>(null);
@@ -200,6 +244,8 @@ function normalizeCustomPlansSignature(list: CustomPlanDefinition[]): string {
 function arePreferencesEqual(a: UserPreferences, b: UserPreferences): boolean {
   const shelfA = a.shelfPlanIds ?? [];
   const shelfB = b.shelfPlanIds ?? [];
+  const privA = sanitizeFriendPrivacy(a.friendPrivacy);
+  const privB = sanitizeFriendPrivacy(b.friendPrivacy);
   return (
     a.streakGraceEnabled === b.streakGraceEnabled &&
     a.celebrationsEnabled === b.celebrationsEnabled &&
@@ -207,7 +253,14 @@ function arePreferencesEqual(a: UserPreferences, b: UserPreferences): boolean {
     a.seenAchievementIds.length === b.seenAchievementIds.length &&
     a.seenAchievementIds.every((id, idx) => id === b.seenAchievementIds[idx]) &&
     shelfA.length === shelfB.length &&
-    shelfA.every((id, idx) => id === shelfB[idx])
+    shelfA.every((id, idx) => id === shelfB[idx]) &&
+    privA.sharingEnabled === privB.sharingEnabled &&
+    privA.showPhoto === privB.showPhoto &&
+    privA.showStreak === privB.showStreak &&
+    privA.showRecentBook === privB.showRecentBook &&
+    privA.showBookProgress === privB.showBookProgress &&
+    privA.showSealsCount === privB.showSealsCount &&
+    privA.showActivePlan === privB.showActivePlan
   );
 }
 
@@ -268,6 +321,27 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [pendingMerge, setPendingMerge] = useState<PendingGuestMerge | null>(null);
 
+  const [ownFriendProfile, setOwnFriendProfile] = useState<FriendProfile | null>(null);
+  const [friendships, setFriendships] = useState<FriendshipRecord[]>([]);
+  const [friendProfilesByUid, setFriendProfilesByUid] = useState<Record<string, FriendProfile>>({});
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [friendsError, setFriendsError] = useState<string | null>(null);
+  const [friendsFromCache, setFriendsFromCache] = useState(false);
+  const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const code = extractInviteCodeFromLocation(window.location.search);
+    if (code && typeof window.history?.replaceState === 'function') {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('addFriend');
+        window.history.replaceState(null, '', url.toString());
+      } catch {
+        // Ignore URL cleanup errors
+      }
+    }
+    return code;
+  });
+
   const prevUnlockedSetRef = useRef<Set<string> | null>(null);
   const logsRef = useRef<ReadingLogEntry[]>(logs);
   logsRef.current = logs;
@@ -279,9 +353,19 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   colorSchemeRef.current = colorScheme;
   const userRef = useRef<AccountUser | null>(user);
   userRef.current = user;
+  const ownFriendProfileRef = useRef<FriendProfile | null>(ownFriendProfile);
+  ownFriendProfileRef.current = ownFriendProfile;
+  const friendshipsRef = useRef<FriendshipRecord[]>(friendships);
+  friendshipsRef.current = friendships;
+  const friendProfilesRef = useRef<Record<string, FriendProfile>>(friendProfilesByUid);
+  friendProfilesRef.current = friendProfilesByUid;
+  const lastPublishedFriendSigRef = useRef<string | null>(null);
+  const friendSyncTimerRef = useRef<number | null>(null);
 
   const authSessionTokenRef = useRef(0);
   const cloudUnsubRef = useRef<(() => void) | null>(null);
+  const friendshipsUnsubRef = useRef<(() => void) | null>(null);
+  const friendProfileUnsubsRef = useRef<Map<string, () => void>>(new Map());
   const pendingWritesRef = useRef(0);
   const pendingPrefsWritesRef = useRef(0);
   const pendingLogWritesRef = useRef(0);
@@ -418,6 +502,139 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
   }, []);
 
+  const clearFriendProfileSubscriptions = useCallback(() => {
+    for (const unsub of friendProfileUnsubsRef.current.values()) {
+      unsub();
+    }
+    friendProfileUnsubsRef.current.clear();
+  }, []);
+
+  const detachFriendListeners = useCallback(() => {
+    friendshipsUnsubRef.current?.();
+    friendshipsUnsubRef.current = null;
+    clearFriendProfileSubscriptions();
+    if (friendSyncTimerRef.current !== null) {
+      window.clearTimeout(friendSyncTimerRef.current);
+      friendSyncTimerRef.current = null;
+    }
+  }, [clearFriendProfileSubscriptions]);
+
+  const persistCurrentFriendCache = useCallback(
+    (uid: string, nextOwn: FriendProfile | null, nextShips: FriendshipRecord[], nextProfiles: Record<string, FriendProfile>) => {
+      void saveFriendCache({
+        ownerUid: uid,
+        ownProfile: nextOwn,
+        friendships: nextShips,
+        profilesByUid: nextProfiles,
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    []
+  );
+
+  const syncFriendProfileSubscriptions = useCallback(
+    (uid: string, records: FriendshipRecord[], sessionToken: number) => {
+      const acceptedFriendUids = new Set<string>();
+      for (const rec of records) {
+        if (rec.status !== 'accepted') continue;
+        const counterpart = getFriendCounterpart(rec, uid);
+        if (counterpart.uid) {
+          acceptedFriendUids.add(counterpart.uid);
+        }
+      }
+
+      // Unsubscribe friends no longer accepted
+      for (const [fUid, unsub] of friendProfileUnsubsRef.current.entries()) {
+        if (!acceptedFriendUids.has(fUid)) {
+          unsub();
+          friendProfileUnsubsRef.current.delete(fUid);
+        }
+      }
+
+      // Prune cached profiles for removed friends
+      setFriendProfilesByUid((prev) => {
+        let changed = false;
+        const next: Record<string, FriendProfile> = {};
+        for (const [k, v] of Object.entries(prev)) {
+          if (acceptedFriendUids.has(k)) {
+            next[k] = v;
+          } else {
+            changed = true;
+          }
+        }
+        if (changed) {
+          friendProfilesRef.current = next;
+          persistCurrentFriendCache(uid, ownFriendProfileRef.current, records, next);
+          return next;
+        }
+        return prev;
+      });
+
+      // Subscribe newly accepted friends
+      for (const fUid of acceptedFriendUids) {
+        if (friendProfileUnsubsRef.current.has(fUid)) continue;
+        const unsub = subscribeFriendProfile(
+          fUid,
+          (profile) => {
+            if (authSessionTokenRef.current !== sessionToken) return;
+            setFriendProfilesByUid((prev) => {
+              const next = { ...prev };
+              if (profile) {
+                next[fUid] = profile;
+              } else {
+                delete next[fUid];
+              }
+              friendProfilesRef.current = next;
+              persistCurrentFriendCache(
+                uid,
+                ownFriendProfileRef.current,
+                friendshipsRef.current,
+                next
+              );
+              return next;
+            });
+          },
+          () => {
+            // Silently ignore transient listener errors when friendship changes
+          }
+        );
+        friendProfileUnsubsRef.current.set(fUid, unsub);
+      }
+    },
+    [persistCurrentFriendCache]
+  );
+
+  const attachFriendListeners = useCallback(
+    (uid: string, sessionToken: number) => {
+      detachFriendListeners();
+      setFriendsLoading(true);
+      setFriendsError(null);
+      friendshipsUnsubRef.current = subscribeFriendships(uid, {
+        onFriendships: (records, fromCache) => {
+          if (authSessionTokenRef.current !== sessionToken) return;
+          friendshipsRef.current = records;
+          setFriendships(records);
+          setFriendsLoading(false);
+          setFriendsFromCache(fromCache);
+          setFriendsError(null);
+          syncFriendProfileSubscriptions(uid, records, sessionToken);
+          persistCurrentFriendCache(
+            uid,
+            ownFriendProfileRef.current,
+            records,
+            friendProfilesRef.current
+          );
+        },
+        onError: (err) => {
+          if (authSessionTokenRef.current !== sessionToken) return;
+          setFriendsLoading(false);
+          setFriendsError(formatCloudError(err));
+        },
+      });
+    },
+    [detachFriendListeners, persistCurrentFriendCache, syncFriendProfileSubscriptions]
+  );
+
   const attachCloudListeners = useCallback(
     (uid: string, sessionToken: number) => {
       cloudUnsubRef.current?.();
@@ -504,6 +721,8 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (!nextUser) {
           cloudUnsubRef.current?.();
           cloudUnsubRef.current = null;
+          detachFriendListeners();
+          lastPublishedFriendSigRef.current = null;
           pendingWritesRef.current = 0;
           pendingPrefsWritesRef.current = 0;
           pendingLogWritesRef.current = 0;
@@ -511,6 +730,15 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           const hadCloudOwner = Boolean(getLocalOwnerUid() || userRef.current);
           setUser(null);
           userRef.current = null;
+          setOwnFriendProfile(null);
+          ownFriendProfileRef.current = null;
+          setFriendships([]);
+          friendshipsRef.current = [];
+          setFriendProfilesByUid({});
+          friendProfilesRef.current = {};
+          setFriendsLoading(false);
+          setFriendsError(null);
+          setFriendsFromCache(false);
           setAuthLoading(false);
           setPendingMerge(null);
           setSyncStatus('local');
@@ -531,6 +759,26 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setAuthLoading(false);
         setSyncStatus('syncing');
         setSyncError(null);
+
+        void loadFriendCache(nextUser.uid).then((cached) => {
+          if (!cached || authSessionTokenRef.current !== sessionToken) return;
+          if (!ownFriendProfileRef.current && cached.ownProfile) {
+            ownFriendProfileRef.current = cached.ownProfile;
+            setOwnFriendProfile(cached.ownProfile);
+          }
+          if (friendshipsRef.current.length === 0 && cached.friendships.length > 0) {
+            friendshipsRef.current = cached.friendships;
+            setFriendships(cached.friendships);
+            setFriendsFromCache(true);
+          }
+          if (
+            Object.keys(friendProfilesRef.current).length === 0 &&
+            Object.keys(cached.profilesByUid).length > 0
+          ) {
+            friendProfilesRef.current = cached.profilesByUid;
+            setFriendProfilesByUid(cached.profilesByUid);
+          }
+        });
 
         try {
           const localLogs = logsRef.current;
@@ -619,12 +867,14 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           }
 
           attachCloudListeners(nextUser.uid, sessionToken);
+          attachFriendListeners(nextUser.uid, sessionToken);
         } catch (err) {
           if (authSessionTokenRef.current !== sessionToken) return;
           const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
           setSyncStatus(offline ? 'offline' : 'error');
           setSyncError(formatCloudError(err));
           attachCloudListeners(nextUser.uid, sessionToken);
+          attachFriendListeners(nextUser.uid, sessionToken);
         }
       })();
     });
@@ -633,8 +883,9 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       unsubscribe();
       cloudUnsubRef.current?.();
       cloudUnsubRef.current = null;
+      detachFriendListeners();
     };
-  }, [attachCloudListeners, firebaseAvailable, hydrateSilently]);
+  }, [attachCloudListeners, attachFriendListeners, detachFriendListeners, firebaseAvailable, hydrateSilently]);
 
   const summary = useMemo(
     () =>
@@ -1145,11 +1396,43 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setUser(updated);
       userRef.current = updated;
       await saveCloudDisplayName(updated.uid, updated.displayName ?? '');
+      if (ownFriendProfileRef.current) {
+        const currentSummary = computeBibleProgress(logsRef.current, {
+          streakGraceEnabled: prefsRef.current.streakGraceEnabled,
+        });
+        const currentAchievements = evaluateAchievements(logsRef.current, currentSummary);
+        const currentAllPlans = getAllReadingPlans(
+          customPlansRef.current.map((def) => materializeCustomPlan(def))
+        );
+        void publishOwnFriendStats({
+          user: updated,
+          friendCode: ownFriendProfileRef.current.friendCode,
+          summary: currentSummary,
+          achievements: currentAchievements,
+          preferences: prefsRef.current,
+          allPlans: currentAllPlans,
+          syncCodeName: true,
+        })
+          .then((published) => {
+            if (published) {
+              ownFriendProfileRef.current = published;
+              setOwnFriendProfile(published);
+              lastPublishedFriendSigRef.current = computeFriendStatsSignature(published);
+              persistCurrentFriendCache(
+                updated.uid,
+                published,
+                friendshipsRef.current,
+                friendProfilesRef.current
+              );
+            }
+          })
+          .catch(() => {});
+      }
       setAnnouncement('Updated account display name.');
     } catch (err) {
       throw new Error(formatAuthError(err));
     }
-  }, []);
+  }, [persistCurrentFriendCache]);
 
   const sendPasswordReset = useCallback(async (email: string) => {
     try {
@@ -1162,6 +1445,8 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const signOut = useCallback(async () => {
     cloudUnsubRef.current?.();
     cloudUnsubRef.current = null;
+    detachFriendListeners();
+    lastPublishedFriendSigRef.current = null;
     pendingWritesRef.current = 0;
     pendingPrefsWritesRef.current = 0;
     pendingLogWritesRef.current = 0;
@@ -1171,13 +1456,22 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     await clearAllSanctuaryData();
     setUser(null);
     userRef.current = null;
+    setOwnFriendProfile(null);
+    ownFriendProfileRef.current = null;
+    setFriendships([]);
+    friendshipsRef.current = [];
+    setFriendProfilesByUid({});
+    friendProfilesRef.current = {};
+    setFriendsLoading(false);
+    setFriendsError(null);
+    setFriendsFromCache(false);
     setPendingMerge(null);
     setSyncStatus('local');
     setSyncError(null);
     setLastSyncedAt(null);
     hydrateSilently([], { ...DEFAULT_PREFERENCES }, []);
     setAnnouncement('Signed out of your Selah account.');
-  }, [hydrateSilently]);
+  }, [detachFriendListeners, hydrateSilently]);
 
   const resolveGuestMerge = useCallback(
     async (strategy: 'merge' | 'cloud-only') => {
@@ -1303,6 +1597,262 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, [hydrateSilently]);
 
+  const ensureFriendProfileReady = useCallback(async () => {
+    const activeUser = userRef.current;
+    if (!activeUser) return;
+    try {
+      const currentAllPlans = getAllReadingPlans(
+        customPlansRef.current.map((def) => materializeCustomPlan(def))
+      );
+      const currentSummary = computeBibleProgress(logsRef.current, {
+        streakGraceEnabled: prefsRef.current.streakGraceEnabled,
+      });
+      const currentAchievements = evaluateAchievements(logsRef.current, currentSummary);
+      const profile = await ensureOwnFriendProfile({
+        user: activeUser,
+        summary: currentSummary,
+        achievements: currentAchievements,
+        preferences: prefsRef.current,
+        allPlans: currentAllPlans,
+      });
+      if (profile && userRef.current?.uid === activeUser.uid) {
+        ownFriendProfileRef.current = profile;
+        setOwnFriendProfile(profile);
+        lastPublishedFriendSigRef.current = computeFriendStatsSignature(profile);
+        setFriendsError(null);
+        persistCurrentFriendCache(
+          activeUser.uid,
+          profile,
+          friendshipsRef.current,
+          friendProfilesRef.current
+        );
+      }
+    } catch (err) {
+      setFriendsError(formatCloudError(err));
+    }
+  }, [persistCurrentFriendCache]);
+
+  // Keep own friend profile initialized and synced when reading stats or privacy settings change
+  useEffect(() => {
+    if (!ready || !user || pendingMerge) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+
+    if (!ownFriendProfile) {
+      void ensureFriendProfileReady();
+      return;
+    }
+
+    const privacy = sanitizeFriendPrivacy(preferences.friendPrivacy);
+    const nextStats = buildFriendProfileStats({
+      summary,
+      achievements,
+      preferences,
+      allPlans,
+    });
+    const nextDisplayName =
+      (user.displayName ?? '').trim().slice(0, 100) ||
+      user.email?.split('@')[0]?.trim().slice(0, 100) ||
+      'Selah Reader';
+    const nextPhotoURL =
+      privacy.sharingEnabled && privacy.showPhoto
+        ? sanitizeHttpsPhotoUrl(user.photoURL)
+        : null;
+
+    const nextSig = computeFriendStatsSignature({
+      displayName: nextDisplayName,
+      photoURL: nextPhotoURL,
+      friendCode: ownFriendProfile.friendCode,
+      sharingEnabled: privacy.sharingEnabled,
+      privacy,
+      stats: nextStats,
+    });
+
+    if (lastPublishedFriendSigRef.current === nextSig) return;
+
+    if (friendSyncTimerRef.current !== null) {
+      window.clearTimeout(friendSyncTimerRef.current);
+    }
+    const targetUid = user.uid;
+    const friendCode = ownFriendProfile.friendCode;
+
+    friendSyncTimerRef.current = window.setTimeout(() => {
+      friendSyncTimerRef.current = null;
+      const currentUser = userRef.current;
+      if (!currentUser || currentUser.uid !== targetUid) return;
+      void publishOwnFriendStats({
+        user: currentUser,
+        friendCode,
+        summary,
+        achievements,
+        preferences,
+        allPlans,
+      })
+        .then((published) => {
+          if (!published || userRef.current?.uid !== targetUid) return;
+          ownFriendProfileRef.current = published;
+          setOwnFriendProfile(published);
+          lastPublishedFriendSigRef.current = computeFriendStatsSignature(published);
+          persistCurrentFriendCache(
+            targetUid,
+            published,
+            friendshipsRef.current,
+            friendProfilesRef.current
+          );
+        })
+        .catch(() => {
+          // Ignore background stats refresh errors; will retry on next change or reload
+        });
+    }, 550);
+
+    return () => {
+      if (friendSyncTimerRef.current !== null) {
+        window.clearTimeout(friendSyncTimerRef.current);
+        friendSyncTimerRef.current = null;
+      }
+    };
+  }, [
+    achievements,
+    allPlans,
+    ensureFriendProfileReady,
+    ownFriendProfile,
+    pendingMerge,
+    persistCurrentFriendCache,
+    preferences,
+    ready,
+    summary,
+    user,
+  ]);
+
+  const clearPendingInviteCode = useCallback(() => {
+    setPendingInviteCode(null);
+  }, []);
+
+  const lookupFriendByCode = useCallback(async (rawInput: string) => {
+    return lookupCloudFriendByCode(rawInput);
+  }, []);
+
+  const sendFriendRequest = useCallback(async (target: FriendCodeLookup) => {
+    const activeUser = userRef.current;
+    if (!activeUser) {
+      throw new Error('Sign in to send friend requests.');
+    }
+    const result = await sendCloudFriendRequest({
+      currentUser: activeUser,
+      target,
+      ownPrivacy: prefsRef.current.friendPrivacy,
+    });
+    setAnnouncement(
+      result.outcome === 'accepted'
+        ? `Added ${target.displayName} to your reading circle.`
+        : `Sent friend request to ${target.displayName}.`
+    );
+    return result.outcome;
+  }, []);
+
+  const acceptFriendRequest = useCallback(async (pairId: string) => {
+    const activeUser = userRef.current;
+    if (!activeUser) return;
+    await acceptCloudFriendRequest({
+      currentUser: activeUser,
+      pairId,
+      ownPrivacy: prefsRef.current.friendPrivacy,
+    });
+    setAnnouncement('Friend request accepted.');
+  }, []);
+
+  const declineFriendRequest = useCallback(async (pairId: string) => {
+    await deleteCloudFriendship(pairId);
+    setAnnouncement('Friend request declined.');
+  }, []);
+
+  const cancelFriendRequest = useCallback(async (pairId: string) => {
+    await deleteCloudFriendship(pairId);
+    setAnnouncement('Friend request cancelled.');
+  }, []);
+
+  const removeFriend = useCallback(async (pairId: string) => {
+    await deleteCloudFriendship(pairId);
+    setAnnouncement('Removed friend from your reading circle.');
+  }, []);
+
+  const blockFriend = useCallback(
+    async (targetUid: string, displayName: string, pairId?: string) => {
+      const activeUser = userRef.current;
+      if (!activeUser) return;
+      await blockUserAndRemoveFriendship({
+        myUid: activeUser.uid,
+        targetUid,
+        targetDisplayName: displayName,
+        pairId,
+      });
+      setAnnouncement(`Blocked ${displayName}.`);
+    },
+    []
+  );
+
+  const regenerateFriendCode = useCallback(async () => {
+    const activeUser = userRef.current;
+    if (!activeUser) return;
+    const currentAllPlans = getAllReadingPlans(
+      customPlansRef.current.map((def) => materializeCustomPlan(def))
+    );
+    const currentSummary = computeBibleProgress(logsRef.current, {
+      streakGraceEnabled: prefsRef.current.streakGraceEnabled,
+    });
+    const currentAchievements = evaluateAchievements(logsRef.current, currentSummary);
+    const updated = await regenerateOwnFriendCode({
+      user: activeUser,
+      previousCode: ownFriendProfileRef.current?.friendCode ?? null,
+      summary: currentSummary,
+      achievements: currentAchievements,
+      preferences: prefsRef.current,
+      allPlans: currentAllPlans,
+    });
+    if (updated) {
+      ownFriendProfileRef.current = updated;
+      setOwnFriendProfile(updated);
+      lastPublishedFriendSigRef.current = computeFriendStatsSignature(updated);
+      persistCurrentFriendCache(
+        activeUser.uid,
+        updated,
+        friendshipsRef.current,
+        friendProfilesRef.current
+      );
+      setAnnouncement('Generated a new friend code.');
+    }
+  }, [persistCurrentFriendCache]);
+
+  const friends = useMemo<FriendConnection[]>(() => {
+    if (!user) return [];
+    return friendships
+      .filter((f) => f.status === 'accepted')
+      .map((f) => {
+        const counterpart = getFriendCounterpart(f, user.uid);
+        const profile = friendProfilesByUid[counterpart.uid] ?? null;
+        return {
+          friendship: f,
+          friendUid: counterpart.uid,
+          displayName: profile?.displayName || counterpart.displayName,
+          photoURL: profile ? profile.photoURL : counterpart.photoURL,
+          profile,
+        };
+      });
+  }, [friendProfilesByUid, friendships, user]);
+
+  const incomingRequests = useMemo<FriendshipRecord[]>(() => {
+    if (!user) return [];
+    return friendships
+      .filter((f) => f.status === 'pending' && f.recipientUid === user.uid)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [friendships, user]);
+
+  const outgoingRequests = useMemo<FriendshipRecord[]>(() => {
+    if (!user) return [];
+    return friendships
+      .filter((f) => f.status === 'pending' && f.requesterUid === user.uid)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [friendships, user]);
+
   const value: BibleStoreValue = {
     ready,
     logs,
@@ -1348,6 +1898,24 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     signOut,
     resolveGuestMerge,
     syncNow,
+    ownFriendProfile,
+    friends,
+    incomingRequests,
+    outgoingRequests,
+    friendsLoading,
+    friendsError,
+    friendsFromCache,
+    pendingInviteCode,
+    clearPendingInviteCode,
+    ensureFriendProfileReady,
+    lookupFriendByCode,
+    sendFriendRequest,
+    acceptFriendRequest,
+    declineFriendRequest,
+    cancelFriendRequest,
+    removeFriend,
+    blockFriend,
+    regenerateFriendCode,
   };
 
   return <BibleStoreContext.Provider value={value}>{children}</BibleStoreContext.Provider>;

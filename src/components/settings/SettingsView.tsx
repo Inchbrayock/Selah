@@ -14,6 +14,7 @@ import {
   Sun,
   Trash2,
   Upload,
+  Users,
 } from 'lucide-react';
 import { exportSanctuaryBackupFile } from '../../lib/backupFile';
 import { SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
@@ -27,6 +28,7 @@ interface SettingsViewProps {
   onBack: () => void;
   backLabel: string;
   onOpenAccount: () => void;
+  onOpenFriends?: () => void;
 }
 
 const SECTION_LINKS: {
@@ -45,6 +47,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onBack,
   backLabel,
   onOpenAccount,
+  onOpenFriends,
 }) => {
   const {
     user,
@@ -239,6 +242,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             >
               {user ? 'Manage account' : 'Sign in'}
             </button>
+            {onOpenFriends && (
+              <button
+                type="button"
+                onClick={onOpenFriends}
+                className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-canvas)] sm:min-h-9"
+              >
+                <Users className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
+                <span>Reading Circle &amp; privacy</span>
+              </button>
+            )}
           </section>
         </aside>
 

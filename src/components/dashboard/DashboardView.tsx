@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Award, BookOpen, CalendarCheck, Flame, TrendingUp } from 'lucide-react';
+import { Award, BookOpen, CalendarCheck, Flame, TrendingUp, Users } from 'lucide-react';
 import { BOOKS_BY_ID, DIVISION_META_BY_ID } from '../../data/bibleCanon';
 import { formatPlainDate } from '../../lib/dates';
 import { FOLIO_EASE, SPRING_PROGRESS, SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
@@ -22,6 +22,7 @@ interface DashboardViewProps {
     tab: 'library' | 'achievements' | 'journal',
     options?: { journalSubTab?: 'journal' | 'plans' }
   ) => void;
+  onOpenFriends?: () => void;
 }
 
 function formatPercent(read: number, total: number): string {
@@ -34,8 +35,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenBook,
   onInspectAchievement,
   onNavigateTab,
+  onOpenFriends,
 }) => {
-  const { summary, achievements, logs, preferences, activateDemoJourney } = useBibleStore();
+  const {
+    user,
+    summary,
+    achievements,
+    logs,
+    preferences,
+    friends,
+    incomingRequests,
+    activateDemoJourney,
+  } = useBibleStore();
+
+  const litCircleCount = useMemo(
+    () =>
+      friends.filter(
+        (conn) =>
+          Boolean(conn.profile?.sharingEnabled) &&
+          Boolean(conn.profile?.privacy.showStreak) &&
+          (conn.profile?.stats.currentStreak ?? 0) > 0
+      ).length,
+    [friends]
+  );
 
   const closestAchievement = useMemo(() => {
     return (
@@ -414,6 +436,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </section>
       </div>
+
+      {/* Quiet Reading Circle summary strip when signed in with friends or pending invites */}
+      {onOpenFriends && user && (friends.length > 0 || incomingRequests.length > 0) && (
+        <section
+          aria-label="Reading Circle summary"
+          className="folio-sheet flex flex-col justify-between gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:px-5 sm:py-4"
+        >
+          <div className="flex min-w-0 items-start gap-3 sm:items-center">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
+              <Users className="h-4 w-4 text-[var(--color-accent)]" aria-hidden="true" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-display text-base font-medium text-[var(--text-primary)]">
+                  Reading Circle
+                </h2>
+                {incomingRequests.length > 0 && (
+                  <span className="inline-flex items-center rounded-full bg-[var(--color-accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-accent)] tabular-nums">
+                    {incomingRequests.length} incoming{' '}
+                    {incomingRequests.length === 1 ? 'request' : 'requests'}
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 text-xs text-[var(--text-secondary)] tabular-nums">
+                {friends.length > 0
+                  ? `${friends.length} ${friends.length === 1 ? 'friend' : 'friends'} connected, ${litCircleCount} ${litCircleCount === 1 ? 'lamp' : 'lamps'} lit today`
+                  : 'Review your incoming Reading Circle invitation'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onOpenFriends}
+            className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3.5 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface)]"
+          >
+            Open Reading Circle
+          </button>
+        </section>
+      )}
 
       {/* Band 4: 52-Week Heatmap */}
       <ReadingHeatmap />

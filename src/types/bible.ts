@@ -190,12 +190,86 @@ export interface ReadingPlanDay {
 
 export type ColorSchemePreference = 'system' | 'light' | 'dark';
 
+export interface FriendPrivacySettings {
+  sharingEnabled: boolean;
+  showPhoto: boolean;
+  showStreak: boolean;
+  showRecentBook: boolean;
+  showBookProgress: boolean;
+  showSealsCount: boolean;
+  showActivePlan: boolean;
+}
+
+export interface FriendStatsSnapshot {
+  totalChaptersRead: number;
+  otChaptersRead: number;
+  ntChaptersRead: number;
+  booksCompleted: number;
+  currentStreak: number;
+  longestStreak: number;
+  unlockedSealsCount: number;
+  lastReadBookId: string | null;
+  lastReadDate: string | null;
+  activePlanId: string | null;
+  activePlanTitle: string | null;
+  bookProgressSpec: string;
+}
+
+export interface FriendProfile {
+  uid: string;
+  displayName: string;
+  photoURL: string | null;
+  friendCode: string;
+  sharingEnabled: boolean;
+  privacy: FriendPrivacySettings;
+  stats: FriendStatsSnapshot;
+  updatedAt?: string;
+}
+
+export type FriendshipStatus = 'pending' | 'accepted';
+
+export interface FriendshipRecord {
+  id: string;
+  users: [string, string];
+  requesterUid: string;
+  recipientUid: string;
+  requesterName: string;
+  requesterPhotoURL: string | null;
+  recipientName: string;
+  recipientPhotoURL: string | null;
+  status: FriendshipStatus;
+  createdAt: string;
+  acceptedAt: string | null;
+  updatedAt: string;
+}
+
+export interface FriendCodeLookup {
+  code: string;
+  uid: string;
+  displayName: string;
+}
+
+export interface FriendConnection {
+  friendship: FriendshipRecord;
+  friendUid: string;
+  displayName: string;
+  photoURL: string | null;
+  profile: FriendProfile | null;
+}
+
+export interface BlockedFriendRecord {
+  blockedUid: string;
+  displayName: string;
+  createdAt: string;
+}
+
 export interface UserPreferences {
   streakGraceEnabled: boolean;
   celebrationsEnabled: boolean;
   activePlanId: string | null;
   seenAchievementIds: string[];
   shelfPlanIds?: string[];
+  friendPrivacy?: FriendPrivacySettings;
 }
 
 export interface SanctuaryBackup {

@@ -24,6 +24,8 @@ rules_version = '2';
 //          - activePlanId: string | null (required key, null or 1..64 chars)
 //          - seenAchievementIds: list (required, 0..100 items, each string 1..64 chars)
 //          - shelfPlanIds: list (optional, 0..100 items, each string matching ^[a-z0-9-]{1,64}$)
+//          - friendPrivacy: map (optional, exact 7 bool keys: sharingEnabled, showPhoto,
+//              showStreak, showRecentBook, showBookProgress, showSealsCount, showActivePlan)
 //      - colorScheme: string (required, one of: 'system', 'light', 'dark')
 //      - createdAt: timestamp (required, immutable, must equal request.time on create)
 //      - updatedAt: timestamp (required, must equal request.time on create and update)
@@ -71,6 +73,74 @@ rules_version = '2';
 //      - accentColor: string (required, one of allowed CSS custom property tokens)
 //      - createdAt: string (required, immutable, ISO 8601 date/instant string, 10..40 chars)
 //      - clientUpdatedAt: string (required, ISO 8601 date/instant string, 10..40 chars)
+//      - updatedAt: timestamp (required, must equal request.time on create and update)
+//
+// 4. Subcollection: users/{userId}/blockedUsers
+//    Document ID: {blockedUid} (1..128 chars, ^[a-zA-Z0-9:-]{1,128}$, != {userId})
+//    Access: Strictly private to the owner (`request.auth.uid == userId`).
+//            `update` is disallowed; users create (block) and delete (unblock) only.
+//    Fields:
+//      - blockedUid: string (required, == {blockedUid}, != {userId}, 1..128 chars, ^[a-zA-Z0-9:-]{1,128}$)
+//      - displayName: string (required, 0..100 chars)
+//      - createdAt: timestamp (required, must equal request.time on create)
+//
+// 5. Collection: friendCodes
+//    Document ID: {code} (8-char Crockford-style code, ^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$)
+//    Access: Authenticated single-document `get` only (`allow list: if false` prevents enumeration).
+//            Owner (`uid == request.auth.uid`) may create, update, and delete.
+//            Contains no email PII, photoURL, or reading stats.
+//    Fields:
+//      - code: string (required, immutable, == {code}, ^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$)
+//      - uid: string (required, immutable, == request.auth.uid, 1..128 chars, ^[a-zA-Z0-9:-]{1,128}$)
+//      - displayName: string (required, 0..100 chars)
+//      - updatedAt: timestamp (required, must equal request.time on create and update)
+//
+// 6. Collection: friendProfiles
+//    Document ID: {userId} (1..128 chars, ^[a-zA-Z0-9:-]{1,128}$)
+//    Access: Single-document `get` by owner or accepted friend (`friendships/{pairId}.status == 'accepted'`).
+//            `allow list: if false` prevents scraping. `allow delete: if false`.
+//            Contains no email PII.
+//    Fields:
+//      - uid: string (required, immutable, == {userId}, 1..128 chars, ^[a-zA-Z0-9:-]{1,128}$)
+//      - displayName: string (required, 0..100 chars)
+//      - photoURL: string | null (required key, null or https:// URL 1..1000 chars)
+//      - friendCode: string (required, ^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$)
+//      - sharingEnabled: bool (required)
+//      - privacy: map (required, exact 7 bool keys: sharingEnabled, showPhoto, showStreak,
+//          showRecentBook, showBookProgress, showSealsCount, showActivePlan)
+//      - stats: map (required, exact 12 keys):
+//          - totalChaptersRead: int (required, 0..1189)
+//          - otChaptersRead: int (required, 0..929)
+//          - ntChaptersRead: int (required, 0..260)
+//          - booksCompleted: int (required, 0..66)
+//          - currentStreak: int (required, 0..20000)
+//          - longestStreak: int (required, 0..20000)
+//          - unlockedSealsCount: int (required, 0..100)
+//          - lastReadBookId: string | null (required key, null or 1..40 chars matching ^[a-z0-9-]+$)
+//          - lastReadDate: string | null (required key, null or YYYY-MM-DD calendar date)
+//          - activePlanId: string | null (required key, null or 1..64 chars)
+//          - activePlanTitle: string | null (required key, null or 1..80 chars)
+//          - bookProgressSpec: string (required, 0..1000 chars, '' or bookId:count pairs)
+//      - updatedAt: timestamp (required, must equal request.time on create and update)
+//
+// 7. Collection: friendships
+//    Document ID: {pairId} (canonical sorted `uidA + '_' + uidB` where `uidA < uidB`)
+//    Access: Participants (`request.auth.uid in users`) may `get`, `list` (when filtered
+//            with `where('users', 'array-contains', uid)`), and `delete` (cancel/decline/unfriend).
+//            Requester creates in `'pending'` state when recipient has a `friendProfiles` doc and
+//            neither user has blocked the other. Only recipient may update `'pending'` -> `'accepted'`.
+//    Fields:
+//      - id: string (required, immutable, == {pairId})
+//      - users: list of 2 strings (required, immutable, sorted `users[0] < users[1]`, each ^[a-zA-Z0-9:-]{1,128}$)
+//      - requesterUid: string (required, immutable, in `users`)
+//      - recipientUid: string (required, immutable, in `users`, != `requesterUid`)
+//      - requesterName: string (required, immutable, 0..100 chars)
+//      - requesterPhotoURL: string | null (required key, immutable, null or https:// URL 1..1000 chars)
+//      - recipientName: string (required, 0..100 chars)
+//      - recipientPhotoURL: string | null (required key, null or https:// URL 1..1000 chars)
+//      - status: string (required, 'pending' or 'accepted')
+//      - createdAt: timestamp (required, immutable, must equal request.time on create)
+//      - acceptedAt: timestamp | null (required key, null while pending, == request.time on accept)
 //      - updatedAt: timestamp (required, must equal request.time on create and update)
 //
 // ===============================================================
@@ -163,6 +233,54 @@ service cloud.firestore {
         isoStr.matches("^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])(T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})?)?$");
     }
 
+    // Validate UID format (1..128 chars, alphanumeric plus ':' and '-', excluding '_')
+    function isValidUidString(uid) {
+      return uid is string &&
+        uid.size() >= 1 &&
+        uid.size() <= 128 &&
+        uid.matches("^[a-zA-Z0-9:-]{1,128}$");
+    }
+
+    // Validate 8-character Crockford-style friend code
+    function isValidFriendCodeString(code) {
+      return code is string &&
+        code.size() == 8 &&
+        code.matches("^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$");
+    }
+
+    // Validate display name string (0..100 chars)
+    function isValidDisplayName(name) {
+      return name is string && name.size() <= 100;
+    }
+
+    // Validate optional HTTPS photo URL (null or 1..1000 chars starting with https://)
+    function isValidOptionalPhotoUrl(url) {
+      return url == null ||
+        (url is string &&
+         url.size() >= 1 &&
+         url.size() <= 1000 &&
+         url.matches("^https://.{1,992}$"));
+    }
+
+    // Validate integer within inclusive bounds [minVal, maxVal]
+    function isIntInRange(val, minVal, maxVal) {
+      return val is int && val >= minVal && val <= maxVal;
+    }
+
+    // Compute canonical sorted friendship document ID for two UIDs
+    function friendPairId(uidA, uidB) {
+      return uidA < uidB ? uidA + '_' + uidB : uidB + '_' + uidA;
+    }
+
+    // Check if the authenticated user has an accepted friendship with targetUid
+    function isAcceptedFriend(targetUid) {
+      return isAuthenticated() &&
+        request.auth.uid != targetUid &&
+        isValidUidString(targetUid) &&
+        exists(/databases/$(database)/documents/friendships/$(friendPairId(request.auth.uid, targetUid))) &&
+        get(/databases/$(database)/documents/friendships/$(friendPairId(request.auth.uid, targetUid))).data.status == 'accepted';
+    }
+
     // ===============================================================
     // Domain Validators (Used in BOTH create and update)
     // ===============================================================
@@ -236,13 +354,35 @@ service cloud.firestore {
         (ids.size() == 0 || isValidNonEmptyShelfPlanIds(ids));
     }
 
+    function isValidFriendPrivacy(privacy) {
+      let keys = [
+        'sharingEnabled',
+        'showPhoto',
+        'showStreak',
+        'showRecentBook',
+        'showBookProgress',
+        'showSealsCount',
+        'showActivePlan'
+      ];
+      return isValidMap(privacy, keys) &&
+        privacy.keys().hasAll(keys) &&
+        privacy.sharingEnabled is bool &&
+        privacy.showPhoto is bool &&
+        privacy.showStreak is bool &&
+        privacy.showRecentBook is bool &&
+        privacy.showBookProgress is bool &&
+        privacy.showSealsCount is bool &&
+        privacy.showActivePlan is bool;
+    }
+
     function isValidPreferences(prefs) {
       let allowedPrefKeys = [
         'streakGraceEnabled',
         'celebrationsEnabled',
         'activePlanId',
         'seenAchievementIds',
-        'shelfPlanIds'
+        'shelfPlanIds',
+        'friendPrivacy'
       ];
       let requiredPrefKeys = [
         'streakGraceEnabled',
@@ -259,7 +399,8 @@ service cloud.firestore {
            prefs.activePlanId.size() >= 1 &&
            prefs.activePlanId.size() <= 64)) &&
         isValidSeenAchievementIds(prefs.seenAchievementIds) &&
-        (!('shelfPlanIds' in prefs) || isValidShelfPlanIds(prefs.shelfPlanIds));
+        (!('shelfPlanIds' in prefs) || isValidShelfPlanIds(prefs.shelfPlanIds)) &&
+        (!('friendPrivacy' in prefs) || isValidFriendPrivacy(prefs.friendPrivacy));
     }
 
     function isValidUser(data, userId) {
@@ -415,6 +556,140 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidFriendCode(data, code) {
+      let keys = ['code', 'uid', 'displayName', 'updatedAt'];
+      return hasOnlyAllowedFields(keys) &&
+        hasRequiredFields(keys) &&
+        isValidFriendCodeString(code) &&
+        isValidFriendCodeString(data.code) &&
+        data.code == code &&
+        isValidUidString(data.uid) &&
+        isValidDisplayName(data.displayName) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidFriendStats(stats) {
+      let keys = [
+        'totalChaptersRead',
+        'otChaptersRead',
+        'ntChaptersRead',
+        'booksCompleted',
+        'currentStreak',
+        'longestStreak',
+        'unlockedSealsCount',
+        'lastReadBookId',
+        'lastReadDate',
+        'activePlanId',
+        'activePlanTitle',
+        'bookProgressSpec'
+      ];
+      return isValidMap(stats, keys) &&
+        stats.keys().hasAll(keys) &&
+        isIntInRange(stats.totalChaptersRead, 0, 1189) &&
+        isIntInRange(stats.otChaptersRead, 0, 929) &&
+        isIntInRange(stats.ntChaptersRead, 0, 260) &&
+        isIntInRange(stats.booksCompleted, 0, 66) &&
+        isIntInRange(stats.currentStreak, 0, 20000) &&
+        isIntInRange(stats.longestStreak, 0, 20000) &&
+        isIntInRange(stats.unlockedSealsCount, 0, 100) &&
+        (stats.lastReadBookId == null ||
+          (stats.lastReadBookId is string &&
+           stats.lastReadBookId.size() >= 1 &&
+           stats.lastReadBookId.size() <= 40 &&
+           stats.lastReadBookId.matches("^[a-z0-9-]+$"))) &&
+        (stats.lastReadDate == null || isValidPlainDate(stats.lastReadDate)) &&
+        (stats.activePlanId == null ||
+          (stats.activePlanId is string &&
+           stats.activePlanId.size() >= 1 &&
+           stats.activePlanId.size() <= 64)) &&
+        (stats.activePlanTitle == null ||
+          (stats.activePlanTitle is string &&
+           stats.activePlanTitle.size() >= 1 &&
+           stats.activePlanTitle.size() <= 80)) &&
+        stats.bookProgressSpec is string &&
+        stats.bookProgressSpec.size() <= 1000 &&
+        (stats.bookProgressSpec == '' ||
+         stats.bookProgressSpec.matches("^([a-z0-9-]+:[0-9]{1,3})(,[a-z0-9-]+:[0-9]{1,3})*$"));
+    }
+
+    function isValidFriendProfile(data, userId) {
+      let keys = [
+        'uid',
+        'displayName',
+        'photoURL',
+        'friendCode',
+        'sharingEnabled',
+        'privacy',
+        'stats',
+        'updatedAt'
+      ];
+      return hasOnlyAllowedFields(keys) &&
+        hasRequiredFields(keys) &&
+        isValidUidString(userId) &&
+        isValidUidString(data.uid) &&
+        data.uid == userId &&
+        isValidDisplayName(data.displayName) &&
+        isValidOptionalPhotoUrl(data.photoURL) &&
+        isValidFriendCodeString(data.friendCode) &&
+        data.sharingEnabled is bool &&
+        isValidFriendPrivacy(data.privacy) &&
+        isValidFriendStats(data.stats) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidFriendship(data, pairId) {
+      let keys = [
+        'id',
+        'users',
+        'requesterUid',
+        'recipientUid',
+        'requesterName',
+        'requesterPhotoURL',
+        'recipientName',
+        'recipientPhotoURL',
+        'status',
+        'createdAt',
+        'acceptedAt',
+        'updatedAt'
+      ];
+      return hasOnlyAllowedFields(keys) &&
+        hasRequiredFields(keys) &&
+        data.id is string &&
+        data.id == pairId &&
+        data.users is list &&
+        data.users.size() == 2 &&
+        isValidUidString(data.users[0]) &&
+        isValidUidString(data.users[1]) &&
+        data.users[0] < data.users[1] &&
+        pairId == data.users[0] + '_' + data.users[1] &&
+        data.requesterUid is string &&
+        data.requesterUid in data.users &&
+        data.recipientUid is string &&
+        data.recipientUid in data.users &&
+        data.recipientUid != data.requesterUid &&
+        isValidDisplayName(data.requesterName) &&
+        isValidOptionalPhotoUrl(data.requesterPhotoURL) &&
+        isValidDisplayName(data.recipientName) &&
+        isValidOptionalPhotoUrl(data.recipientPhotoURL) &&
+        data.status is string &&
+        data.status in ['pending', 'accepted'] &&
+        data.createdAt is timestamp &&
+        (data.status == 'pending' ? data.acceptedAt == null : data.acceptedAt is timestamp) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBlockedUser(data, userId, blockedUid) {
+      let keys = ['blockedUid', 'displayName', 'createdAt'];
+      return hasOnlyAllowedFields(keys) &&
+        hasRequiredFields(keys) &&
+        isValidUidString(blockedUid) &&
+        isValidUidString(data.blockedUid) &&
+        data.blockedUid == blockedUid &&
+        data.blockedUid != userId &&
+        isValidDisplayName(data.displayName) &&
+        data.createdAt is timestamp;
+    }
+
     // ===============================================================
     // Collection Rules
     // ===============================================================
@@ -482,6 +757,106 @@ service cloud.firestore {
           resource != null &&
           resource.data.uid == userId;
       }
+
+      match /blockedUsers/{blockedUid} {
+        allow read: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+          isValidBlockedUser(request.resource.data, userId, blockedUid) &&
+          isServerTimestamp(request.resource.data.createdAt);
+
+        allow update: if false;
+
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    match /friendCodes/{code} {
+      // Single-code lookups only; list disabled to prevent user/code enumeration.
+      allow get: if isAuthenticated();
+      allow list: if false;
+
+      allow create: if isAuthenticated() &&
+        uidUnchanged() &&
+        request.resource.data.uid == request.auth.uid &&
+        isValidFriendCode(request.resource.data, code) &&
+        isServerTimestamp(request.resource.data.updatedAt);
+
+      allow update: if isAuthenticated() &&
+        isDocOwner() &&
+        uidNotModified() &&
+        areImmutableFieldsUnchanged(['code', 'uid']) &&
+        isValidFriendCode(request.resource.data, code) &&
+        isServerTimestamp(request.resource.data.updatedAt);
+
+      allow delete: if isAuthenticated() &&
+        resource != null &&
+        isDocOwner();
+    }
+
+    match /friendProfiles/{userId} {
+      // Owner or accepted friends only; list disabled to prevent profile scraping.
+      allow get: if isOwner(userId) || isAcceptedFriend(userId);
+      allow list: if false;
+
+      allow create: if isOwner(userId) &&
+        uidUnchanged() &&
+        isValidFriendProfile(request.resource.data, userId) &&
+        isServerTimestamp(request.resource.data.updatedAt);
+
+      allow update: if isOwner(userId) &&
+        isDocOwner() &&
+        uidNotModified() &&
+        areImmutableFieldsUnchanged(['uid']) &&
+        isValidFriendProfile(request.resource.data, userId) &&
+        isServerTimestamp(request.resource.data.updatedAt);
+
+      allow delete: if false;
+    }
+
+    match /friendships/{pairId} {
+      // Participants may inspect their own friendship pair (including pre-create existence checks).
+      allow get: if isAuthenticated() &&
+        ((resource == null &&
+          pairId.matches("^[a-zA-Z0-9:-]{1,128}_[a-zA-Z0-9:-]{1,128}$") &&
+          request.auth.uid in pairId.split('_')) ||
+         (resource != null && request.auth.uid in resource.data.users));
+
+      // Queries must filter with where('users', 'array-contains', request.auth.uid).
+      allow list: if isAuthenticated() &&
+        request.auth.uid in resource.data.users;
+
+      allow create: if isAuthenticated() &&
+        isValidFriendship(request.resource.data, pairId) &&
+        request.resource.data.requesterUid == request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.acceptedAt == null &&
+        isServerTimestamp(request.resource.data.createdAt) &&
+        isServerTimestamp(request.resource.data.updatedAt) &&
+        exists(/databases/$(database)/documents/friendProfiles/$(request.resource.data.recipientUid)) &&
+        !exists(/databases/$(database)/documents/users/$(request.resource.data.recipientUid)/blockedUsers/$(request.auth.uid)) &&
+        !exists(/databases/$(database)/documents/users/$(request.auth.uid)/blockedUsers/$(request.resource.data.recipientUid));
+
+      allow update: if isAuthenticated() &&
+        resource.data.status == 'pending' &&
+        request.resource.data.status == 'accepted' &&
+        request.auth.uid == resource.data.recipientUid &&
+        areImmutableFieldsUnchanged([
+          'id',
+          'users',
+          'requesterUid',
+          'recipientUid',
+          'requesterName',
+          'requesterPhotoURL',
+          'createdAt'
+        ]) &&
+        isValidFriendship(request.resource.data, pairId) &&
+        isServerTimestamp(request.resource.data.acceptedAt) &&
+        isServerTimestamp(request.resource.data.updatedAt);
+
+      allow delete: if isAuthenticated() &&
+        resource != null &&
+        request.auth.uid in resource.data.users;
     }
 
     // ===============================================================
