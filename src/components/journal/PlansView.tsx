@@ -11,6 +11,10 @@ import {
 import { CORE_DEFAULT_PLAN_IDS } from '../../data/readingPlans';
 import { extractSectionsFromPlan } from '../../lib/customPlans';
 import { formatPlainDate, todayPlainDate } from '../../lib/dates';
+import {
+  getActiveLocalPlanIdForCohort,
+  materializeSharedCohortPlan,
+} from '../../lib/fellowship';
 import { SPRING_SEAL, SPRING_TACTILE, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
 import {
   buildPlanStages,
@@ -25,12 +29,14 @@ import {
   type PlanProgressState,
 } from '../../lib/plans';
 import { useBibleStore, type SaveCustomPlanInput } from '../../store/useBibleStore';
-import type { ReadingPlan } from '../../types/bible';
+import type { ReadingPlan, SharedPlanCohort } from '../../types/bible';
 import { ActivePlanFocusCard } from './ActivePlanFocusCard';
 import { CustomPlanBuilder, type CustomPlanDraft } from './CustomPlanBuilder';
 import { PlanFinderView } from './PlanFinderView';
 import { PlanJourneyMatrix } from './PlanJourneyMatrix';
 import { PlanSelectorStrip } from './PlanSelectorStrip';
+import { ReadTogetherBand } from './ReadTogetherBand';
+import { ReadTogetherModal } from './ReadTogetherModal';
 
 interface PlansViewProps {
   onOpenBook?: (bookId: string) => void;
@@ -57,7 +63,13 @@ export const PlansView: React.FC<PlansViewProps> = ({
     logChapters,
     saveCustomPlan,
     removeCustomPlan,
+    sharedPlans,
   } = useBibleStore();
+
+  const [readTogetherModal, setReadTogetherModal] = useState<{
+    plan: ReadingPlan;
+    existingCohort: SharedPlanCohort | null;
+  } | null>(null);
 
   const [mode, setMode] = useState<PlansScreenMode>('workspace');
   const [builderDraft, setBuilderDraft] = useState<CustomPlanDraft | undefined>(undefined);
@@ -347,10 +359,32 @@ export const PlansView: React.FC<PlansViewProps> = ({
             onLogDay={handleLogPlanDay}
             onCustomizeCopy={(plan) => openCopyBuilder(plan, 'workspace')}
             onEditCustomPlan={(plan) => openEditBuilder(plan, 'workspace')}
+            onReadTogether={(plan) => setReadTogetherModal({ plan, existingCohort: null })}
+            activeCohortCount={
+              sharedPlans.filter(
+                (sp) =>
+                  sp.myMembership?.status === 'joined' &&
+                  getActiveLocalPlanIdForCohort(sp.cohort) === activePlan.id
+              ).length
+            }
             onDeleteCustomPlan={async (id) => {
               setRecentlyRemoved(null);
               await removeCustomPlan(id);
             }}
+          />
+
+          <ReadTogetherBand
+            activePlanId={activePlan.id}
+            onSelectLocalPlan={(localPlanId) => {
+              setRecentlyRemoved(null);
+              void activateReadingPlan(localPlanId);
+            }}
+            onInviteToCohort={(cohort) =>
+              setReadTogetherModal({
+                plan: materializeSharedCohortPlan(cohort),
+                existingCohort: cohort,
+              })
+            }
           />
 
           {/* Interactive Journey Map */}
@@ -643,6 +677,29 @@ export const PlansView: React.FC<PlansViewProps> = ({
       </section>
         </>
       )}
+
+      {!hasActiveShelfPlan && (
+        <ReadTogetherBand
+          activePlanId={null}
+          onSelectLocalPlan={(localPlanId) => {
+            setRecentlyRemoved(null);
+            void activateReadingPlan(localPlanId);
+          }}
+          onInviteToCohort={(cohort) =>
+            setReadTogetherModal({
+              plan: materializeSharedCohortPlan(cohort),
+              existingCohort: cohort,
+            })
+          }
+        />
+      )}
+
+      <ReadTogetherModal
+        open={Boolean(readTogetherModal)}
+        plan={readTogetherModal?.plan ?? null}
+        existingCohort={readTogetherModal?.existingCohort ?? null}
+        onClose={() => setReadTogetherModal(null)}
+      />
     </div>
   );
 };

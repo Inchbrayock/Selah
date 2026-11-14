@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { BookOpen, Check, CheckCircle2, Copy, Edit3, Trash2 } from 'lucide-react';
+import { BookOpen, Check, CheckCircle2, Copy, Edit3, Trash2, Users } from 'lucide-react';
 import { addDays, formatPlainDate, todayPlainDate } from '../../lib/dates';
 import { SPRING_PROGRESS, SPRING_SEAL, SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
 import type { PlanCoverageMeta, PlanDayStatus, PlanProgressState } from '../../lib/plans';
@@ -16,6 +16,8 @@ interface ActivePlanFocusCardProps {
   onCustomizeCopy?: (plan: ReadingPlan) => void;
   onEditCustomPlan?: (plan: ReadingPlan) => void;
   onDeleteCustomPlan?: (planId: string) => Promise<void>;
+  onReadTogether?: (plan: ReadingPlan) => void;
+  activeCohortCount?: number;
 }
 
 export const ActivePlanFocusCard: React.FC<ActivePlanFocusCardProps> = ({
@@ -27,6 +29,8 @@ export const ActivePlanFocusCard: React.FC<ActivePlanFocusCardProps> = ({
   onCustomizeCopy,
   onEditCustomPlan,
   onDeleteCustomPlan,
+  onReadTogether,
+  activeCohortCount,
 }) => {
   const todayIso = todayPlainDate();
   const [readDate, setReadDate] = useState(todayIso);
@@ -105,8 +109,24 @@ export const ActivePlanFocusCard: React.FC<ActivePlanFocusCardProps> = ({
             {plan.description}
           </p>
 
-          {(onCustomizeCopy || (plan.isCustom && (onEditCustomPlan || onDeleteCustomPlan))) && (
+          {(onReadTogether ||
+            onCustomizeCopy ||
+            (plan.isCustom && (onEditCustomPlan || onDeleteCustomPlan))) && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
+              {onReadTogether && (
+                <button
+                  type="button"
+                  onClick={() => onReadTogether(plan)}
+                  className="tactile-press inline-flex min-h-8 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--text-primary)]"
+                >
+                  <Users className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
+                  <span>
+                    {activeCohortCount && activeCohortCount > 0
+                      ? `Read together (${activeCohortCount})`
+                      : 'Read together'}
+                  </span>
+                </button>
+              )}
               {plan.isCustom && onEditCustomPlan && (
                 <button
                   type="button"

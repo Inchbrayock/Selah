@@ -214,10 +214,17 @@ export const AchievementModal: React.FC<AchievementModalProps> = ({
             transition={{ duration: 0.24, delay: 0.06, ease: FOLIO_EASE }}
             className="mt-1 text-center"
           >
-            <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-accent)]">
-              {!achievement.unlocked && <Lock className="h-3 w-3" aria-hidden="true" />}
-              {TIER_LABELS[achievement.definition.tier]}
-            </span>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-accent)]">
+                {!achievement.unlocked && <Lock className="h-3 w-3" aria-hidden="true" />}
+                {TIER_LABELS[achievement.definition.tier]}
+              </span>
+              {achievement.definition.bonus && (
+                <span className="inline-flex items-center rounded-md border border-[var(--border-subtle)] bg-[var(--color-sage-soft)] px-2.5 py-1 text-xs font-medium text-[var(--color-sage)]">
+                  Optional Fellowship Seal
+                </span>
+              )}
+            </div>
 
             <h2
               id="achievement-modal-title"

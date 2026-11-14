@@ -1,7 +1,11 @@
 import { BIBLE_BOOKS } from './bibleCanon';
-import { diffCalendarDays, getDayOfWeek, getLocalHourFromIsoInstant } from '../lib/dates';
+import { diffCalendarDays, getDayOfWeek, getLocalHourFromIsoInstant, todayPlainDate } from '../lib/dates';
 import { countConsecutiveSundays } from '../lib/progress';
-import type { AchievementDefinition, AchievementEvalContext } from '../types/bible';
+import type {
+  AchievementDefinition,
+  AchievementEvalContext,
+  FellowshipStatsCounters,
+} from '../types/bible';
 
 function latestLogDate(ctx: AchievementEvalContext): string | null {
   let latest: string | null = null;
@@ -567,3 +571,71 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     },
   },
 ];
+
+export interface FellowshipAchievementDefinition extends Omit<AchievementDefinition, 'evaluate'> {
+  bonus: true;
+  evaluateFellowship: (stats: FellowshipStatsCounters) => number;
+}
+
+/**
+ * Optional bonus seals celebrating Reading Circle companionship.
+ * Strictly separate from the 28 core seals so solo/offline readers always achieve 28/28.
+ */
+export const FELLOWSHIP_SEALS_CATALOG: FellowshipAchievementDefinition[] = [
+  {
+    id: 'fellowship-first-friend',
+    title: 'Iron Sharpens Iron',
+    subtitle: 'Join a Reading Circle',
+    description: 'Connect with 1 accepted friend in your Reading Circle.',
+    scriptureEcho: '“Iron sharpens iron, and one man sharpens another.” — Prov 27:17',
+    tier: 'bronze',
+    category: 'fellowship',
+    motif: 'fellowship',
+    bonus: true,
+    target: 1,
+    evaluateFellowship: (stats) => stats.friendsPeak,
+  },
+  {
+    id: 'fellowship-read-together',
+    title: 'Two Are Better Than One',
+    subtitle: 'Shared Plan Cohort',
+    description: 'Start or join a Read Together reading plan alongside friends.',
+    scriptureEcho: '“Two are better than one, because they have a good reward for their toil.” — Eccl 4:9',
+    tier: 'silver',
+    category: 'fellowship',
+    motif: 'fellowship',
+    bonus: true,
+    target: 1,
+    evaluateFellowship: (stats) => stats.cohortsPeak,
+  },
+  {
+    id: 'fellowship-encourager',
+    title: 'Word in Season',
+    subtitle: '3 Quiet Encouragements',
+    description: 'Send 3 quiet encouragement notes to friends in your Reading Circle.',
+    scriptureEcho: '“A word in season, how good it is!” — Prov 15:23',
+    tier: 'silver',
+    category: 'fellowship',
+    motif: 'fellowship',
+    bonus: true,
+    target: 3,
+    evaluateFellowship: (stats) => stats.encouragementsSent,
+  },
+  {
+    id: 'fellowship-threefold-cord',
+    title: 'A Threefold Cord',
+    subtitle: 'Three Circle Companions',
+    description: 'Read alongside 3 friends in your Reading Circle.',
+    scriptureEcho: '“A threefold cord is not quickly broken.” — Eccl 4:12',
+    tier: 'gold',
+    category: 'fellowship',
+    motif: 'fellowship',
+    bonus: true,
+    target: 3,
+    evaluateFellowship: (stats) => stats.friendsPeak,
+  },
+];
+
+export function resolveFellowshipUnlockDate(unlocked: boolean): string | null {
+  return unlocked ? todayPlainDate() : null;
+}

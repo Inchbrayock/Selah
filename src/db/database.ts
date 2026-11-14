@@ -3,7 +3,9 @@ import type {
   CustomPlanDefinition,
   FriendProfile,
   FriendshipRecord,
+  QuietEncouragement,
   ReadingLogEntry,
+  SharedPlanWithMembers,
   UserPreferences,
 } from '../types/bible';
 
@@ -17,6 +19,9 @@ export interface StoredFriendCacheRow {
   ownProfile: FriendProfile | null;
   friendships: FriendshipRecord[];
   profilesByUid: Record<string, FriendProfile>;
+  sharedPlans?: SharedPlanWithMembers[];
+  encouragements?: QuietEncouragement[];
+  sentCooldowns?: Record<string, string>;
   updatedAt: string;
 }
 
@@ -38,6 +43,12 @@ class SelahDatabase extends Dexie {
       customPlans: 'id, updatedAt',
     });
     this.version(3).stores({
+      readingLogs: 'id, bookId, readDate, loggedAt',
+      preferences: 'key',
+      customPlans: 'id, updatedAt',
+      friendCache: 'ownerUid',
+    });
+    this.version(4).stores({
       readingLogs: 'id, bookId, readDate, loggedAt',
       preferences: 'key',
       customPlans: 'id, updatedAt',

@@ -3,6 +3,7 @@ import { createDemoReadingLogs } from './demoSeed';
 import { CORE_DEFAULT_PLAN_IDS } from '../data/readingPlans';
 import { sanitizeCustomPlanDefinition } from '../lib/customPlans';
 import { todayPlainDate } from '../lib/dates';
+import { DEFAULT_FELLOWSHIP_STATS, sanitizeFellowshipStats } from '../lib/fellowship';
 import { DEFAULT_FRIEND_PRIVACY, sanitizeFriendPrivacy } from '../lib/friends';
 import { sanitizeShelfPlanIds } from '../lib/plans';
 import type {
@@ -19,6 +20,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   seenAchievementIds: [],
   shelfPlanIds: [...CORE_DEFAULT_PLAN_IDS],
   friendPrivacy: { ...DEFAULT_FRIEND_PRIVACY },
+  fellowshipStats: { ...DEFAULT_FELLOWSHIP_STATS },
 };
 
 export function normalizeUserPreferences(
@@ -58,6 +60,7 @@ export function normalizeUserPreferences(
     seenAchievementIds,
     shelfPlanIds,
     friendPrivacy: sanitizeFriendPrivacy(input?.friendPrivacy),
+    fellowshipStats: sanitizeFellowshipStats(input?.fellowshipStats),
   };
 }
 

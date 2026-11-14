@@ -18,6 +18,7 @@ const CATEGORIES: { id: 'all' | AchievementCategory; label: string }[] = [
   { id: 'consistency', label: 'Consistency' },
   { id: 'habits', label: 'Habits' },
   { id: 'special', label: 'Secret seals' },
+  { id: 'fellowship', label: 'Fellowship (Bonus)' },
 ];
 
 const TIER_ORDER: AchievementTier[] = ['bronze', 'silver', 'gold', 'luminous'];
@@ -32,7 +33,7 @@ const TIER_NAMES: Record<AchievementTier, string> = {
 export const AchievementsView: React.FC<AchievementsViewProps> = ({
   onInspectAchievement,
 }) => {
-  const { achievements } = useBibleStore();
+  const { achievements, fellowshipAchievements } = useBibleStore();
   const [category, setCategory] = useState<'all' | AchievementCategory>('all');
   const [onlyUnlocked, setOnlyUnlocked] = useState(false);
 
@@ -47,7 +48,8 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
   }, [achievements]);
 
   const filtered = useMemo(() => {
-    return achievements
+    const source = category === 'fellowship' ? fellowshipAchievements : achievements;
+    return source
       .filter((a) => {
         if (category !== 'all' && a.definition.category !== category) return false;
         if (onlyUnlocked && !a.unlocked) return false;
@@ -57,7 +59,7 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
         if (a.unlocked !== b.unlocked) return a.unlocked ? -1 : 1;
         return b.percentage - a.percentage;
       });
-  }, [achievements, category, onlyUnlocked]);
+  }, [achievements, category, fellowshipAchievements, onlyUnlocked]);
 
   return (
     <div className="space-y-6 sm:space-y-8">
@@ -126,6 +128,14 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
           </label>
         </div>
       </section>
+
+      {category === 'fellowship' && (
+        <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--color-sage-soft)] px-4 py-3 text-xs leading-relaxed text-[var(--text-primary)]">
+          Optional bonus seals celebrating shared reading and encouragement. They are kept separate
+          from the {achievements.length} core solo seals so offline and solo readers can always earn{' '}
+          {achievements.length}/{achievements.length}.
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <div className="folio-sheet p-10 text-center">

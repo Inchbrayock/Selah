@@ -83,7 +83,8 @@ export type AchievementCategory =
   | 'divisions'
   | 'consistency'
   | 'habits'
-  | 'special';
+  | 'special'
+  | 'fellowship';
 
 export type AchievementMotif =
   | 'scroll'
@@ -100,7 +101,8 @@ export type AchievementMotif =
   | 'star'
   | 'shield'
   | 'chalice'
-  | 'alpha-omega';
+  | 'alpha-omega'
+  | 'fellowship';
 
 export interface AchievementDefinition {
   id: string;
@@ -112,6 +114,7 @@ export interface AchievementDefinition {
   category: AchievementCategory;
   motif: AchievementMotif;
   secret?: boolean;
+  bonus?: boolean;
   target: number;
   evaluate: (ctx: AchievementEvalContext) => {
     current: number;
@@ -263,6 +266,70 @@ export interface BlockedFriendRecord {
   createdAt: string;
 }
 
+export interface FellowshipStatsCounters {
+  friendsPeak: number;
+  cohortsPeak: number;
+  encouragementsSent: number;
+}
+
+export type EncouragementPresetId =
+  | 'praying'
+  | 'alongside'
+  | 'keep-going'
+  | 'grace-peace';
+
+export interface QuietEncouragement {
+  senderUid: string;
+  recipientUid: string;
+  senderName: string;
+  senderPhotoURL: string | null;
+  presetId: EncouragementPresetId;
+  cohortTitle: string | null;
+  sentCount: number;
+  sentAt: string;
+  acknowledgedAt: string | null;
+}
+
+export type SharedPlanType = 'builtin' | 'custom';
+export type SharedPlanMemberStatus = 'invited' | 'joined';
+
+export interface SharedPlanCohort {
+  id: string;
+  hostUid: string;
+  hostName: string;
+  planType: SharedPlanType;
+  sourcePlanId: string;
+  title: string;
+  description: string;
+  sections: CustomPlanSection[];
+  durationDays: number;
+  accentColor: string;
+  participantUids: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SharedPlanMember {
+  uid: string;
+  cohortId: string;
+  displayName: string;
+  photoURL: string | null;
+  status: SharedPlanMemberStatus;
+  completedDays: number;
+  totalDays: number;
+  readChapters: number;
+  totalChapters: number;
+  lastReadDate: string | null;
+  joinedAt: string | null;
+  updatedAt: string;
+}
+
+export interface SharedPlanWithMembers {
+  cohort: SharedPlanCohort;
+  members: SharedPlanMember[];
+  myMembership: SharedPlanMember | null;
+}
+
 export interface UserPreferences {
   streakGraceEnabled: boolean;
   celebrationsEnabled: boolean;
@@ -270,6 +337,7 @@ export interface UserPreferences {
   seenAchievementIds: string[];
   shelfPlanIds?: string[];
   friendPrivacy?: FriendPrivacySettings;
+  fellowshipStats?: FellowshipStatsCounters;
 }
 
 export interface SanctuaryBackup {

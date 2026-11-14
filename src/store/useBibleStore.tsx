@@ -39,6 +39,20 @@ import {
   subscribeFriendships,
 } from '../db/friendsSync';
 import {
+  acknowledgeQuietEncouragement as ackCloudEncouragement,
+  createSharedPlanCohort as createCloudSharedCohort,
+  deleteSharedPlanCohort as deleteCloudSharedCohort,
+  fetchSentEncouragementSentAt,
+  inviteFriendToCohort as inviteCloudFriendToCohort,
+  joinSharedPlanCohort as joinCloudSharedCohort,
+  leaveOrDeclineSharedCohort as leaveOrDeclineCloudSharedCohort,
+  publishSharedPlanMemberProgress,
+  sendQuietEncouragement as sendCloudQuietEncouragement,
+  subscribeReceivedEncouragements,
+  subscribeSharedPlanMembers,
+  subscribeSharedPlans,
+} from '../db/fellowshipSync';
+import {
   addReadingLog,
   buildBackupPayload,
   clearAllSanctuaryData,
@@ -60,7 +74,7 @@ import {
   updateReadingLog,
   upsertCustomPlan,
 } from '../db/repository';
-import { evaluateAchievements } from '../lib/achievementsEngine';
+import { evaluateAchievements, evaluateFellowshipSeals } from '../lib/achievementsEngine';
 import {
   formatAuthError,
   isAuthAvailable,
@@ -83,8 +97,16 @@ import {
 } from '../lib/customPlans';
 import { todayPlainDate } from '../lib/dates';
 import {
+  buildSharedCustomPlanId,
+  computeCohortMemberProgress,
+  getActiveLocalPlanIdForCohort,
+  getEncouragementPresetLabel,
+  sanitizeFellowshipStats,
+} from '../lib/fellowship';
+import {
   buildFriendProfileStats,
   computeFriendStatsSignature,
+  computeLastReadDate,
   extractInviteCodeFromLocation,
   getFriendCounterpart,
   sanitizeFriendPrivacy,
@@ -115,6 +137,11 @@ import type {
   FriendshipRecord,
   ReadingLogEntry,
   ReadingPlan,
+  EncouragementPresetId,
+  QuietEncouragement,
+  SharedPlanCohort,
+  SharedPlanMember,
+  SharedPlanWithMembers,
   UserPreferences,
 } from '../types/bible';
 
@@ -146,6 +173,7 @@ interface BibleStoreValue {
   colorScheme: ColorSchemePreference;
   summary: BibleProgressSummary;
   achievements: AchievementStatus[];
+  fellowshipAchievements: AchievementStatus[];
   unlockedQueue: AchievementStatus[];
   announcement: string;
   firebaseAvailable: boolean;
@@ -215,9 +243,36 @@ interface BibleStoreValue {
   removeFriend: (pairId: string) => Promise<void>;
   blockFriend: (targetUid: string, displayName: string, pairId?: string) => Promise<void>;
   regenerateFriendCode: () => Promise<void>;
+  sharedPlans: SharedPlanWithMembers[];
+  receivedEncouragements: QuietEncouragement[];
+  sentEncouragementCooldowns: Record<string, string>;
+  createSharedPlanCohort: (plan: ReadingPlan, inviteFriendUids: string[]) => Promise<SharedPlanCohort>;
+  inviteFriendToSharedCohort: (cohortId: string, friendUid: string) => Promise<void>;
+  joinSharedPlanCohort: (cohortId: string) => Promise<void>;
+  leaveSharedPlanCohort: (cohortId: string) => Promise<void>;
+  deleteSharedPlanCohort: (cohortId: string) => Promise<void>;
+  sendQuietEncouragement: (input: {
+    recipientUid: string;
+    presetId: EncouragementPresetId;
+    cohortTitle?: string | null;
+  }) => Promise<void>;
+  acknowledgeQuietEncouragement: (senderUid: string) => Promise<void>;
+  refreshEncouragementCooldown: (recipientUid: string) => Promise<string | null>;
 }
 
 const BibleStoreContext = createContext<BibleStoreValue | null>(null);
+
+function assembleSharedPlansWithMembers(
+  uid: string | undefined,
+  cohorts: SharedPlanCohort[],
+  membersByCohort: Record<string, SharedPlanMember[]>
+): SharedPlanWithMembers[] {
+  return cohorts.map((cohort) => {
+    const members = membersByCohort[cohort.id] ?? [];
+    const myMembership = uid ? members.find((m) => m.uid === uid) ?? null : null;
+    return { cohort, members, myMembership };
+  });
+}
 
 function normalizeLogsSignature(list: ReadingLogEntry[]): string {
   return [...list]
@@ -246,6 +301,8 @@ function arePreferencesEqual(a: UserPreferences, b: UserPreferences): boolean {
   const shelfB = b.shelfPlanIds ?? [];
   const privA = sanitizeFriendPrivacy(a.friendPrivacy);
   const privB = sanitizeFriendPrivacy(b.friendPrivacy);
+  const fStatsA = sanitizeFellowshipStats(a.fellowshipStats);
+  const fStatsB = sanitizeFellowshipStats(b.fellowshipStats);
   return (
     a.streakGraceEnabled === b.streakGraceEnabled &&
     a.celebrationsEnabled === b.celebrationsEnabled &&
@@ -260,7 +317,10 @@ function arePreferencesEqual(a: UserPreferences, b: UserPreferences): boolean {
     privA.showRecentBook === privB.showRecentBook &&
     privA.showBookProgress === privB.showBookProgress &&
     privA.showSealsCount === privB.showSealsCount &&
-    privA.showActivePlan === privB.showActivePlan
+    privA.showActivePlan === privB.showActivePlan &&
+    fStatsA.friendsPeak === fStatsB.friendsPeak &&
+    fStatsA.cohortsPeak === fStatsB.cohortsPeak &&
+    fStatsA.encouragementsSent === fStatsB.encouragementsSent
   );
 }
 
@@ -327,6 +387,14 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [friendsLoading, setFriendsLoading] = useState(false);
   const [friendsError, setFriendsError] = useState<string | null>(null);
   const [friendsFromCache, setFriendsFromCache] = useState(false);
+  const [sharedCohorts, setSharedCohorts] = useState<SharedPlanCohort[]>([]);
+  const [sharedMembersByCohort, setSharedMembersByCohort] = useState<
+    Record<string, SharedPlanMember[]>
+  >({});
+  const [receivedEncouragements, setReceivedEncouragements] = useState<QuietEncouragement[]>([]);
+  const [sentEncouragementCooldowns, setSentEncouragementCooldowns] = useState<
+    Record<string, string>
+  >({});
   const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     const code = extractInviteCodeFromLocation(window.location.search);
@@ -361,11 +429,24 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   friendProfilesRef.current = friendProfilesByUid;
   const lastPublishedFriendSigRef = useRef<string | null>(null);
   const friendSyncTimerRef = useRef<number | null>(null);
+  const sharedCohortsRef = useRef<SharedPlanCohort[]>(sharedCohorts);
+  sharedCohortsRef.current = sharedCohorts;
+  const sharedMembersByCohortRef = useRef<Record<string, SharedPlanMember[]>>(sharedMembersByCohort);
+  sharedMembersByCohortRef.current = sharedMembersByCohort;
+  const receivedEncouragementsRef = useRef<QuietEncouragement[]>(receivedEncouragements);
+  receivedEncouragementsRef.current = receivedEncouragements;
+  const sentCooldownsRef = useRef<Record<string, string>>(sentEncouragementCooldowns);
+  sentCooldownsRef.current = sentEncouragementCooldowns;
 
   const authSessionTokenRef = useRef(0);
   const cloudUnsubRef = useRef<(() => void) | null>(null);
   const friendshipsUnsubRef = useRef<(() => void) | null>(null);
   const friendProfileUnsubsRef = useRef<Map<string, () => void>>(new Map());
+  const sharedPlansUnsubRef = useRef<(() => void) | null>(null);
+  const sharedMemberUnsubsRef = useRef<Map<string, () => void>>(new Map());
+  const encouragementsUnsubRef = useRef<(() => void) | null>(null);
+  const cohortProgressTimerRef = useRef<number | null>(null);
+  const lastPublishedCohortProgressSigRef = useRef<string | null>(null);
   const pendingWritesRef = useRef(0);
   const pendingPrefsWritesRef = useRef(0);
   const pendingLogWritesRef = useRef(0);
@@ -509,23 +590,60 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     friendProfileUnsubsRef.current.clear();
   }, []);
 
+  const clearSharedMemberSubscriptions = useCallback(() => {
+    for (const unsub of sharedMemberUnsubsRef.current.values()) {
+      unsub();
+    }
+    sharedMemberUnsubsRef.current.clear();
+  }, []);
+
   const detachFriendListeners = useCallback(() => {
     friendshipsUnsubRef.current?.();
     friendshipsUnsubRef.current = null;
+    sharedPlansUnsubRef.current?.();
+    sharedPlansUnsubRef.current = null;
+    encouragementsUnsubRef.current?.();
+    encouragementsUnsubRef.current = null;
     clearFriendProfileSubscriptions();
+    clearSharedMemberSubscriptions();
+    lastPublishedCohortProgressSigRef.current = null;
     if (friendSyncTimerRef.current !== null) {
       window.clearTimeout(friendSyncTimerRef.current);
       friendSyncTimerRef.current = null;
     }
-  }, [clearFriendProfileSubscriptions]);
+    if (cohortProgressTimerRef.current !== null) {
+      window.clearTimeout(cohortProgressTimerRef.current);
+      cohortProgressTimerRef.current = null;
+    }
+  }, [clearFriendProfileSubscriptions, clearSharedMemberSubscriptions]);
 
   const persistCurrentFriendCache = useCallback(
-    (uid: string, nextOwn: FriendProfile | null, nextShips: FriendshipRecord[], nextProfiles: Record<string, FriendProfile>) => {
+    (
+      uid: string,
+      nextOwn: FriendProfile | null,
+      nextShips: FriendshipRecord[],
+      nextProfiles: Record<string, FriendProfile>,
+      overrides?: {
+        sharedPlans?: SharedPlanWithMembers[];
+        encouragements?: QuietEncouragement[];
+        sentCooldowns?: Record<string, string>;
+      }
+    ) => {
+      const nextSharedPlans =
+        overrides?.sharedPlans ??
+        assembleSharedPlansWithMembers(
+          uid,
+          sharedCohortsRef.current,
+          sharedMembersByCohortRef.current
+        );
       void saveFriendCache({
         ownerUid: uid,
         ownProfile: nextOwn,
         friendships: nextShips,
         profilesByUid: nextProfiles,
+        sharedPlans: nextSharedPlans,
+        encouragements: overrides?.encouragements ?? receivedEncouragementsRef.current,
+        sentCooldowns: overrides?.sentCooldowns ?? sentCooldownsRef.current,
         updatedAt: new Date().toISOString(),
       });
     },
@@ -604,6 +722,76 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     [persistCurrentFriendCache]
   );
 
+  const syncSharedMemberSubscriptions = useCallback(
+    (uid: string, cohorts: SharedPlanCohort[], sessionToken: number) => {
+      const activeIds = new Set(cohorts.map((c) => c.id));
+
+      for (const [cohortId, unsub] of sharedMemberUnsubsRef.current.entries()) {
+        if (!activeIds.has(cohortId)) {
+          unsub();
+          sharedMemberUnsubsRef.current.delete(cohortId);
+        }
+      }
+
+      setSharedMembersByCohort((prev) => {
+        let changed = false;
+        const next: Record<string, SharedPlanMember[]> = {};
+        for (const [k, v] of Object.entries(prev)) {
+          if (activeIds.has(k)) {
+            next[k] = v;
+          } else {
+            changed = true;
+          }
+        }
+        if (changed) {
+          sharedMembersByCohortRef.current = next;
+          persistCurrentFriendCache(
+            uid,
+            ownFriendProfileRef.current,
+            friendshipsRef.current,
+            friendProfilesRef.current,
+            { sharedPlans: assembleSharedPlansWithMembers(uid, cohorts, next) }
+          );
+          return next;
+        }
+        return prev;
+      });
+
+      for (const cohort of cohorts) {
+        if (sharedMemberUnsubsRef.current.has(cohort.id)) continue;
+        const unsub = subscribeSharedPlanMembers(
+          cohort.id,
+          (members) => {
+            if (authSessionTokenRef.current !== sessionToken) return;
+            setSharedMembersByCohort((prev) => {
+              const next = { ...prev, [cohort.id]: members };
+              sharedMembersByCohortRef.current = next;
+              persistCurrentFriendCache(
+                uid,
+                ownFriendProfileRef.current,
+                friendshipsRef.current,
+                friendProfilesRef.current,
+                {
+                  sharedPlans: assembleSharedPlansWithMembers(
+                    uid,
+                    sharedCohortsRef.current,
+                    next
+                  ),
+                }
+              );
+              return next;
+            });
+          },
+          () => {
+            // Silently ignore transient listener errors when cohort membership changes
+          }
+        );
+        sharedMemberUnsubsRef.current.set(cohort.id, unsub);
+      }
+    },
+    [persistCurrentFriendCache]
+  );
+
   const attachFriendListeners = useCallback(
     (uid: string, sessionToken: number) => {
       detachFriendListeners();
@@ -631,8 +819,57 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           setFriendsError(formatCloudError(err));
         },
       });
+
+      sharedPlansUnsubRef.current = subscribeSharedPlans(uid, {
+        onCohorts: (cohorts) => {
+          if (authSessionTokenRef.current !== sessionToken) return;
+          sharedCohortsRef.current = cohorts;
+          setSharedCohorts(cohorts);
+          syncSharedMemberSubscriptions(uid, cohorts, sessionToken);
+          persistCurrentFriendCache(
+            uid,
+            ownFriendProfileRef.current,
+            friendshipsRef.current,
+            friendProfilesRef.current,
+            {
+              sharedPlans: assembleSharedPlansWithMembers(
+                uid,
+                cohorts,
+                sharedMembersByCohortRef.current
+              ),
+            }
+          );
+        },
+        onError: () => {
+          // Ignore transient listener errors while offline
+        },
+      });
+
+      encouragementsUnsubRef.current = subscribeReceivedEncouragements(
+        uid,
+        (items) => {
+          if (authSessionTokenRef.current !== sessionToken) return;
+          receivedEncouragementsRef.current = items;
+          setReceivedEncouragements(items);
+          persistCurrentFriendCache(
+            uid,
+            ownFriendProfileRef.current,
+            friendshipsRef.current,
+            friendProfilesRef.current,
+            { encouragements: items }
+          );
+        },
+        () => {
+          // Ignore transient encouragement listener errors while offline
+        }
+      );
     },
-    [detachFriendListeners, persistCurrentFriendCache, syncFriendProfileSubscriptions]
+    [
+      detachFriendListeners,
+      persistCurrentFriendCache,
+      syncFriendProfileSubscriptions,
+      syncSharedMemberSubscriptions,
+    ]
   );
 
   const attachCloudListeners = useCallback(
@@ -736,6 +973,14 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           friendshipsRef.current = [];
           setFriendProfilesByUid({});
           friendProfilesRef.current = {};
+          setSharedCohorts([]);
+          sharedCohortsRef.current = [];
+          setSharedMembersByCohort({});
+          sharedMembersByCohortRef.current = {};
+          setReceivedEncouragements([]);
+          receivedEncouragementsRef.current = [];
+          setSentEncouragementCooldowns({});
+          sentCooldownsRef.current = {};
           setFriendsLoading(false);
           setFriendsError(null);
           setFriendsFromCache(false);
@@ -777,6 +1022,37 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           ) {
             friendProfilesRef.current = cached.profilesByUid;
             setFriendProfilesByUid(cached.profilesByUid);
+          }
+          if (
+            sharedCohortsRef.current.length === 0 &&
+            cached.sharedPlans &&
+            cached.sharedPlans.length > 0
+          ) {
+            const cachedCohorts = cached.sharedPlans.map((sp) => sp.cohort);
+            const cachedMembers: Record<string, SharedPlanMember[]> = {};
+            for (const sp of cached.sharedPlans) {
+              cachedMembers[sp.cohort.id] = sp.members;
+            }
+            sharedCohortsRef.current = cachedCohorts;
+            setSharedCohorts(cachedCohorts);
+            sharedMembersByCohortRef.current = cachedMembers;
+            setSharedMembersByCohort(cachedMembers);
+          }
+          if (
+            receivedEncouragementsRef.current.length === 0 &&
+            cached.encouragements &&
+            cached.encouragements.length > 0
+          ) {
+            receivedEncouragementsRef.current = cached.encouragements;
+            setReceivedEncouragements(cached.encouragements);
+          }
+          if (
+            Object.keys(sentCooldownsRef.current).length === 0 &&
+            cached.sentCooldowns &&
+            Object.keys(cached.sentCooldowns).length > 0
+          ) {
+            sentCooldownsRef.current = cached.sentCooldowns;
+            setSentEncouragementCooldowns(cached.sentCooldowns);
           }
         });
 
@@ -898,6 +1174,11 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const achievements = useMemo(
     () => evaluateAchievements(logs, summary),
     [logs, summary]
+  );
+
+  const fellowshipAchievements = useMemo(
+    () => evaluateFellowshipSeals(sanitizeFellowshipStats(preferences.fellowshipStats)),
+    [preferences.fellowshipStats]
   );
 
   // Detect newly unlocked achievements cleanly after mutations
@@ -1462,6 +1743,14 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     friendshipsRef.current = [];
     setFriendProfilesByUid({});
     friendProfilesRef.current = {};
+    setSharedCohorts([]);
+    sharedCohortsRef.current = [];
+    setSharedMembersByCohort({});
+    sharedMembersByCohortRef.current = {};
+    setReceivedEncouragements([]);
+    receivedEncouragementsRef.current = [];
+    setSentEncouragementCooldowns({});
+    sentCooldownsRef.current = {};
     setFriendsLoading(false);
     setFriendsError(null);
     setFriendsFromCache(false);
@@ -1723,6 +2012,113 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     user,
   ]);
 
+  const sharedPlans = useMemo<SharedPlanWithMembers[]>(
+    () => assembleSharedPlansWithMembers(user?.uid, sharedCohorts, sharedMembersByCohort),
+    [sharedCohorts, sharedMembersByCohort, user?.uid]
+  );
+
+  // Track cumulative Fellowship Seal counters monotonically without dropping if friends/cohorts change later
+  useEffect(() => {
+    if (!ready || !user || pendingMerge) return;
+    const acceptedFriendsCount = friendships.filter((f) => f.status === 'accepted').length;
+    const joinedCohortsCount = sharedPlans.filter(
+      (sp) => sp.myMembership?.status === 'joined'
+    ).length;
+    const currentStats = sanitizeFellowshipStats(prefsRef.current.fellowshipStats);
+    const nextFriendsPeak = Math.max(currentStats.friendsPeak, acceptedFriendsCount);
+    const nextCohortsPeak = Math.max(currentStats.cohortsPeak, joinedCohortsCount);
+    if (
+      nextFriendsPeak !== currentStats.friendsPeak ||
+      nextCohortsPeak !== currentStats.cohortsPeak
+    ) {
+      void updatePreferences({
+        fellowshipStats: {
+          ...currentStats,
+          friendsPeak: nextFriendsPeak,
+          cohortsPeak: nextCohortsPeak,
+        },
+      });
+    }
+  }, [friendships, pendingMerge, ready, sharedPlans, updatePreferences, user]);
+
+  // Debounce-sync user's own progress into joined Read Together cohorts
+  useEffect(() => {
+    if (!ready || !user || pendingMerge) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+
+    const joined = sharedPlans.filter((sp) => sp.myMembership?.status === 'joined');
+    if (joined.length === 0) {
+      lastPublishedCohortProgressSigRef.current = null;
+      return;
+    }
+
+    const privacy = sanitizeFriendPrivacy(preferences.friendPrivacy);
+    const nextDisplayName =
+      (user.displayName ?? '').trim().slice(0, 100) ||
+      user.email?.split('@')[0]?.trim().slice(0, 100) ||
+      'Selah Reader';
+    const nextPhotoURL =
+      privacy.sharingEnabled && privacy.showPhoto
+        ? sanitizeHttpsPhotoUrl(user.photoURL)
+        : null;
+
+    const latestReadDate = computeLastReadDate(summary);
+
+    const toSync: SharedPlanCohort[] = [];
+    const sigParts: string[] = [];
+    for (const sp of joined) {
+      const prog = computeCohortMemberProgress(sp.cohort, summary);
+      const cur = sp.myMembership;
+      const changed =
+        !cur ||
+        cur.completedDays !== prog.completedDays ||
+        cur.totalDays !== prog.totalDays ||
+        cur.readChapters !== prog.readChapters ||
+        cur.totalChapters !== prog.totalChapters ||
+        cur.lastReadDate !== latestReadDate ||
+        cur.displayName !== nextDisplayName ||
+        cur.photoURL !== nextPhotoURL;
+      if (changed) {
+        toSync.push(sp.cohort);
+        sigParts.push(
+          `${sp.cohort.id}:${prog.completedDays}/${prog.totalDays}:${prog.readChapters}/${prog.totalChapters}:${latestReadDate ?? ''}:${nextDisplayName}:${nextPhotoURL ?? ''}`
+        );
+      }
+    }
+
+    if (toSync.length === 0) return;
+    const nextSig = sigParts.join('|');
+    if (lastPublishedCohortProgressSigRef.current === nextSig) return;
+
+    if (cohortProgressTimerRef.current !== null) {
+      window.clearTimeout(cohortProgressTimerRef.current);
+    }
+
+    cohortProgressTimerRef.current = window.setTimeout(() => {
+      cohortProgressTimerRef.current = null;
+      lastPublishedCohortProgressSigRef.current = nextSig;
+      const activeUser = userRef.current;
+      if (!activeUser || activeUser.uid !== user.uid) return;
+      for (const cohort of toSync) {
+        void publishSharedPlanMemberProgress({
+          cohort,
+          user: activeUser,
+          ownPrivacy: prefsRef.current.friendPrivacy,
+          summary,
+        }).catch(() => {
+          // Silently retry on subsequent reading change
+        });
+      }
+    }, 1200);
+
+    return () => {
+      if (cohortProgressTimerRef.current !== null) {
+        window.clearTimeout(cohortProgressTimerRef.current);
+        cohortProgressTimerRef.current = null;
+      }
+    };
+  }, [pendingMerge, preferences.friendPrivacy, ready, sharedPlans, summary, user]);
+
   const clearPendingInviteCode = useCallback(() => {
     setPendingInviteCode(null);
   }, []);
@@ -1839,6 +2235,393 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
   }, [friendProfilesByUid, friendships, user]);
 
+  const createSharedPlanCohort = useCallback(
+    async (plan: ReadingPlan, inviteFriendUids: string[]): Promise<SharedPlanCohort> => {
+      const activeUser = userRef.current;
+      if (!activeUser) {
+        throw new Error('Sign in to start a shared reading plan.');
+      }
+      const inviteFriends = inviteFriendUids
+        .map((fUid) => {
+          const match = friends.find((f) => f.friendUid === fUid);
+          if (!match) return null;
+          return {
+            uid: match.friendUid,
+            displayName: match.displayName,
+            photoURL: match.photoURL,
+          };
+        })
+        .filter((f): f is { uid: string; displayName: string; photoURL: string | null } => f !== null);
+
+      const currentSummary = computeBibleProgress(logsRef.current, {
+        streakGraceEnabled: prefsRef.current.streakGraceEnabled,
+      });
+
+      const cohort = await createCloudSharedCohort({
+        hostUser: activeUser,
+        ownPrivacy: prefsRef.current.friendPrivacy,
+        plan,
+        summary: currentSummary,
+        inviteFriends,
+      });
+
+      const nextCohorts = [cohort, ...sharedCohortsRef.current.filter((c) => c.id !== cohort.id)];
+      sharedCohortsRef.current = nextCohorts;
+      setSharedCohorts(nextCohorts);
+
+      const prog = computeCohortMemberProgress(cohort, currentSummary);
+      const nowIso = new Date().toISOString();
+      const hostPriv = sanitizeFriendPrivacy(prefsRef.current.friendPrivacy);
+      const hostMember: SharedPlanMember = {
+        uid: activeUser.uid,
+        cohortId: cohort.id,
+        displayName: cohort.hostName,
+        photoURL:
+          hostPriv.sharingEnabled && hostPriv.showPhoto
+            ? sanitizeHttpsPhotoUrl(activeUser.photoURL)
+            : null,
+        status: 'joined',
+        completedDays: prog.completedDays,
+        totalDays: prog.totalDays,
+        readChapters: prog.readChapters,
+        totalChapters: prog.totalChapters,
+        lastReadDate: null,
+        joinedAt: nowIso,
+        updatedAt: nowIso,
+      };
+      const invitedMembers: SharedPlanMember[] = inviteFriends.map((f) => ({
+        uid: f.uid,
+        cohortId: cohort.id,
+        displayName: f.displayName,
+        photoURL: sanitizeHttpsPhotoUrl(f.photoURL),
+        status: 'invited',
+        completedDays: 0,
+        totalDays: cohort.durationDays,
+        readChapters: 0,
+        totalChapters: prog.totalChapters,
+        lastReadDate: null,
+        joinedAt: null,
+        updatedAt: nowIso,
+      }));
+      const nextMembersMap = {
+        ...sharedMembersByCohortRef.current,
+        [cohort.id]: [hostMember, ...invitedMembers],
+      };
+      sharedMembersByCohortRef.current = nextMembersMap;
+      setSharedMembersByCohort(nextMembersMap);
+
+      persistCurrentFriendCache(
+        activeUser.uid,
+        ownFriendProfileRef.current,
+        friendshipsRef.current,
+        friendProfilesRef.current,
+        {
+          sharedPlans: assembleSharedPlansWithMembers(activeUser.uid, nextCohorts, nextMembersMap),
+        }
+      );
+
+      const activeStats = sanitizeFellowshipStats(prefsRef.current.fellowshipStats);
+      if (activeStats.cohortsPeak < 1) {
+        await updatePreferences({
+          fellowshipStats: {
+            ...activeStats,
+            cohortsPeak: Math.max(activeStats.cohortsPeak, 1),
+          },
+        });
+      }
+
+      setAnnouncement(`Shared "${cohort.title}" with your Reading Circle.`);
+      return cohort;
+    },
+    [friends, persistCurrentFriendCache, updatePreferences]
+  );
+
+  const inviteFriendToSharedCohort = useCallback(
+    async (cohortId: string, friendUid: string) => {
+      const activeUser = userRef.current;
+      if (!activeUser) throw new Error('Sign in to invite friends.');
+      const cohort = sharedCohortsRef.current.find((c) => c.id === cohortId);
+      if (!cohort) throw new Error('Shared reading cohort not found.');
+      const friend = friends.find((f) => f.friendUid === friendUid);
+      if (!friend) throw new Error('Only accepted Reading Circle friends can be invited.');
+
+      await inviteCloudFriendToCohort({
+        cohort,
+        friend: {
+          uid: friend.friendUid,
+          displayName: friend.displayName,
+          photoURL: friend.photoURL,
+        },
+      });
+
+      const updatedCohort: SharedPlanCohort = cohort.participantUids.includes(friend.friendUid)
+        ? cohort
+        : {
+            ...cohort,
+            participantUids: [...cohort.participantUids, friend.friendUid],
+            updatedAt: new Date().toISOString(),
+          };
+      const nextCohorts = sharedCohortsRef.current.map((c) =>
+        c.id === cohort.id ? updatedCohort : c
+      );
+      sharedCohortsRef.current = nextCohorts;
+      setSharedCohorts(nextCohorts);
+      setAnnouncement(`Invited ${friend.displayName} to read "${cohort.title}".`);
+    },
+    [friends]
+  );
+
+  const joinSharedPlanCohort = useCallback(
+    async (cohortId: string) => {
+      const activeUser = userRef.current;
+      if (!activeUser) throw new Error('Sign in to join shared reading plans.');
+      const cohort = sharedCohortsRef.current.find((c) => c.id === cohortId);
+      if (!cohort) throw new Error('Shared reading cohort not found.');
+
+      const existingMembers = sharedMembersByCohortRef.current[cohortId] ?? [];
+      const existingMember = existingMembers.find((m) => m.uid === activeUser.uid) ?? null;
+      const currentSummary = computeBibleProgress(logsRef.current, {
+        streakGraceEnabled: prefsRef.current.streakGraceEnabled,
+      });
+
+      await joinCloudSharedCohort({
+        cohort,
+        user: activeUser,
+        ownPrivacy: prefsRef.current.friendPrivacy,
+        summary: currentSummary,
+        existingMember,
+      });
+
+      if (cohort.planType === 'custom' && cohort.sections.length > 0) {
+        await saveCustomPlan(
+          {
+            id: buildSharedCustomPlanId(cohort.id),
+            title: cohort.title,
+            description: cohort.description,
+            sections: cohort.sections,
+            durationDays: cohort.durationDays,
+            accentColor: cohort.accentColor,
+          },
+          { activate: true }
+        );
+      } else {
+        await activateReadingPlan(getActiveLocalPlanIdForCohort(cohort));
+      }
+
+      const prog = computeCohortMemberProgress(cohort, currentSummary);
+      const nowIso = new Date().toISOString();
+      const nextMember: SharedPlanMember = {
+        uid: activeUser.uid,
+        cohortId: cohort.id,
+        displayName:
+          (activeUser.displayName ?? '').trim() ||
+          activeUser.email?.split('@')[0]?.trim() ||
+          'Selah Reader',
+        photoURL: sanitizeFriendPrivacy(prefsRef.current.friendPrivacy).showPhoto
+          ? sanitizeHttpsPhotoUrl(activeUser.photoURL)
+          : null,
+        status: 'joined',
+        completedDays: prog.completedDays,
+        totalDays: prog.totalDays,
+        readChapters: prog.readChapters,
+        totalChapters: prog.totalChapters,
+        lastReadDate: existingMember?.lastReadDate ?? null,
+        joinedAt: existingMember?.joinedAt ?? nowIso,
+        updatedAt: nowIso,
+      };
+      const nextList = [
+        ...existingMembers.filter((m) => m.uid !== activeUser.uid),
+        nextMember,
+      ];
+      const nextMembersMap = {
+        ...sharedMembersByCohortRef.current,
+        [cohort.id]: nextList,
+      };
+      sharedMembersByCohortRef.current = nextMembersMap;
+      setSharedMembersByCohort(nextMembersMap);
+
+      const activeStats = sanitizeFellowshipStats(prefsRef.current.fellowshipStats);
+      if (activeStats.cohortsPeak < 1) {
+        await updatePreferences({
+          fellowshipStats: {
+            ...activeStats,
+            cohortsPeak: Math.max(activeStats.cohortsPeak, 1),
+          },
+        });
+      }
+
+      setAnnouncement(`Joined shared reading plan "${cohort.title}".`);
+    },
+    [activateReadingPlan, saveCustomPlan, updatePreferences]
+  );
+
+  const leaveSharedPlanCohort = useCallback(
+    async (cohortId: string) => {
+      const activeUser = userRef.current;
+      if (!activeUser) return;
+      const cohort = sharedCohortsRef.current.find((c) => c.id === cohortId);
+      if (!cohort) return;
+      if (cohort.hostUid === activeUser.uid) {
+        throw new Error('As host, end the shared plan group to close it for all members.');
+      }
+
+      await leaveOrDeclineCloudSharedCohort({ cohort, myUid: activeUser.uid });
+
+      const nextCohorts = sharedCohortsRef.current.filter((c) => c.id !== cohortId);
+      sharedCohortsRef.current = nextCohorts;
+      setSharedCohorts(nextCohorts);
+
+      const nextMembersMap = { ...sharedMembersByCohortRef.current };
+      delete nextMembersMap[cohortId];
+      sharedMembersByCohortRef.current = nextMembersMap;
+      setSharedMembersByCohort(nextMembersMap);
+
+      persistCurrentFriendCache(
+        activeUser.uid,
+        ownFriendProfileRef.current,
+        friendshipsRef.current,
+        friendProfilesRef.current,
+        {
+          sharedPlans: assembleSharedPlansWithMembers(activeUser.uid, nextCohorts, nextMembersMap),
+        }
+      );
+
+      setAnnouncement(`Left shared reading plan "${cohort.title}".`);
+    },
+    [persistCurrentFriendCache]
+  );
+
+  const deleteSharedPlanCohort = useCallback(
+    async (cohortId: string) => {
+      const activeUser = userRef.current;
+      if (!activeUser) return;
+      const cohort = sharedCohortsRef.current.find((c) => c.id === cohortId);
+      if (!cohort) return;
+
+      await deleteCloudSharedCohort(cohortId);
+
+      const nextCohorts = sharedCohortsRef.current.filter((c) => c.id !== cohortId);
+      sharedCohortsRef.current = nextCohorts;
+      setSharedCohorts(nextCohorts);
+
+      const nextMembersMap = { ...sharedMembersByCohortRef.current };
+      delete nextMembersMap[cohortId];
+      sharedMembersByCohortRef.current = nextMembersMap;
+      setSharedMembersByCohort(nextMembersMap);
+
+      persistCurrentFriendCache(
+        activeUser.uid,
+        ownFriendProfileRef.current,
+        friendshipsRef.current,
+        friendProfilesRef.current,
+        {
+          sharedPlans: assembleSharedPlansWithMembers(activeUser.uid, nextCohorts, nextMembersMap),
+        }
+      );
+
+      setAnnouncement(`Closed shared reading group "${cohort.title}".`);
+    },
+    [persistCurrentFriendCache]
+  );
+
+  const sendQuietEncouragement = useCallback(
+    async (input: {
+      recipientUid: string;
+      presetId: EncouragementPresetId;
+      cohortTitle?: string | null;
+    }) => {
+      const activeUser = userRef.current;
+      if (!activeUser) {
+        throw new Error('Sign in to send quiet encouragement.');
+      }
+
+      const { sentAt } = await sendCloudQuietEncouragement({
+        senderUser: activeUser,
+        ownPrivacy: prefsRef.current.friendPrivacy,
+        recipientUid: input.recipientUid,
+        presetId: input.presetId,
+        cohortTitle: input.cohortTitle,
+      });
+
+      const nextCooldowns = {
+        ...sentCooldownsRef.current,
+        [input.recipientUid]: sentAt,
+      };
+      sentCooldownsRef.current = nextCooldowns;
+      setSentEncouragementCooldowns(nextCooldowns);
+
+      persistCurrentFriendCache(
+        activeUser.uid,
+        ownFriendProfileRef.current,
+        friendshipsRef.current,
+        friendProfilesRef.current,
+        { sentCooldowns: nextCooldowns }
+      );
+
+      const activeStats = sanitizeFellowshipStats(prefsRef.current.fellowshipStats);
+      await updatePreferences({
+        fellowshipStats: {
+          ...activeStats,
+          encouragementsSent: Math.min(100000, activeStats.encouragementsSent + 1),
+        },
+      });
+
+      setAnnouncement(`Sent quiet note: "${getEncouragementPresetLabel(input.presetId)}".`);
+    },
+    [persistCurrentFriendCache, updatePreferences]
+  );
+
+  const acknowledgeQuietEncouragement = useCallback(
+    async (senderUid: string) => {
+      const activeUser = userRef.current;
+      if (!activeUser) return;
+
+      const nowIso = new Date().toISOString();
+      const nextList = receivedEncouragementsRef.current.map((item) =>
+        item.senderUid === senderUid ? { ...item, acknowledgedAt: nowIso } : item
+      );
+      receivedEncouragementsRef.current = nextList;
+      setReceivedEncouragements(nextList);
+
+      persistCurrentFriendCache(
+        activeUser.uid,
+        ownFriendProfileRef.current,
+        friendshipsRef.current,
+        friendProfilesRef.current,
+        { encouragements: nextList }
+      );
+
+      await ackCloudEncouragement({
+        recipientUid: activeUser.uid,
+        senderUid,
+      });
+      setAnnouncement('Acknowledged quiet encouragement.');
+    },
+    [persistCurrentFriendCache]
+  );
+
+  const refreshEncouragementCooldown = useCallback(
+    async (recipientUid: string): Promise<string | null> => {
+      const activeUser = userRef.current;
+      if (!activeUser || !recipientUid) return null;
+      try {
+        const sentAt = await fetchSentEncouragementSentAt(recipientUid, activeUser.uid);
+        if (sentAt) {
+          const nextCooldowns = {
+            ...sentCooldownsRef.current,
+            [recipientUid]: sentAt,
+          };
+          sentCooldownsRef.current = nextCooldowns;
+          setSentEncouragementCooldowns(nextCooldowns);
+        }
+        return sentAt;
+      } catch {
+        return sentCooldownsRef.current[recipientUid] ?? null;
+      }
+    },
+    []
+  );
+
   const incomingRequests = useMemo<FriendshipRecord[]>(() => {
     if (!user) return [];
     return friendships
@@ -1863,6 +2646,7 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     colorScheme,
     summary,
     achievements,
+    fellowshipAchievements,
     unlockedQueue,
     announcement,
     firebaseAvailable,
@@ -1916,6 +2700,17 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     removeFriend,
     blockFriend,
     regenerateFriendCode,
+    sharedPlans,
+    receivedEncouragements,
+    sentEncouragementCooldowns,
+    createSharedPlanCohort,
+    inviteFriendToSharedCohort,
+    joinSharedPlanCohort,
+    leaveSharedPlanCohort,
+    deleteSharedPlanCohort,
+    sendQuietEncouragement,
+    acknowledgeQuietEncouragement,
+    refreshEncouragementCooldown,
   };
 
   return <BibleStoreContext.Provider value={value}>{children}</BibleStoreContext.Provider>;

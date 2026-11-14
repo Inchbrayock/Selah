@@ -27,6 +27,7 @@ import type { FriendCodeLookup, FriendConnection } from '../../types/bible';
 import { InlineDeleteConfirm } from '../ui/InlineDeleteConfirm';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
 import { SanctuaryLamp } from '../ui/SanctuaryLamp';
+import { EncouragementSlipsPanel } from './EncouragementSlipsPanel';
 import { FriendFolioDialog } from './FriendFolioDialog';
 import { FriendPrivacyPanel } from './FriendPrivacyPanel';
 import { MiniCanonicalSpine } from './MiniCanonicalSpine';
@@ -543,6 +544,8 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
               {friendsError}
             </div>
           )}
+
+          <EncouragementSlipsPanel />
 
           {/* Add a Friend + Pending Requests */}
           <div className="grid gap-6 lg:grid-cols-12 lg:items-start">

@@ -261,6 +261,14 @@ function renderMotifPaths(motif: AchievementMotif, stroke: string) {
           <path d="M35 40H38.5C36 37 35 33.5 35 30C35 25.5 37.8 22 41.5 22C45.2 22 48 25.5 48 30C48 33.5 47 37 44.5 40H48" />
         </g>
       );
+    case 'fellowship':
+      return (
+        <g stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none">
+          <circle cx="26.5" cy="31" r="8.5" />
+          <circle cx="37.5" cy="31" r="8.5" />
+          <path d="M32 21V16.5M28.5 44.5H35.5" />
+        </g>
+      );
   }
 }
 

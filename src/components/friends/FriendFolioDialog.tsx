@@ -8,6 +8,7 @@ import { InlineDeleteConfirm } from '../ui/InlineDeleteConfirm';
 import { ModalDialog } from '../ui/ModalDialog';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
 import { SanctuaryLamp } from '../ui/SanctuaryLamp';
+import { EncouragementSender } from './EncouragementSender';
 import { MiniCanonicalSpine } from './MiniCanonicalSpine';
 
 interface FriendFolioDialogProps {
@@ -278,6 +279,13 @@ export const FriendFolioDialog: React.FC<FriendFolioDialogProps> = ({
                   )}
               </>
             )}
+
+            <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">
+              <EncouragementSender
+                recipientUid={connection.friendUid}
+                recipientName={connection.displayName}
+              />
+            </div>
 
             {actionError && (
               <p role="alert" className="text-xs font-medium text-[var(--color-crimson)]">

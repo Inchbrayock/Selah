@@ -1,8 +1,14 @@
-import { ACHIEVEMENTS_CATALOG } from '../data/achievementsCatalog';
+import {
+  ACHIEVEMENTS_CATALOG,
+  FELLOWSHIP_SEALS_CATALOG,
+  resolveFellowshipUnlockDate,
+} from '../data/achievementsCatalog';
 import { BOOKS_BY_ID } from '../data/bibleCanon';
 import type {
+  AchievementDefinition,
   AchievementStatus,
   BibleProgressSummary,
+  FellowshipStatsCounters,
   ReadingLogEntry,
 } from '../types/bible';
 
@@ -28,6 +34,43 @@ export function evaluateAchievements(
       unlockedAt,
       current: clampedCurrent,
       target: definition.target,
+      percentage,
+    };
+  });
+}
+
+export function evaluateFellowshipSeals(
+  stats: FellowshipStatsCounters
+): AchievementStatus[] {
+  return FELLOWSHIP_SEALS_CATALOG.map((def) => {
+    const rawCurrent = def.evaluateFellowship(stats);
+    const clampedCurrent = Math.min(Math.max(0, rawCurrent), def.target);
+    const unlocked = clampedCurrent >= def.target;
+    const percentage = Math.min(100, (clampedCurrent / def.target) * 100);
+
+    const definition: AchievementDefinition = {
+      id: def.id,
+      title: def.title,
+      subtitle: def.subtitle,
+      description: def.description,
+      scriptureEcho: def.scriptureEcho,
+      tier: def.tier,
+      category: def.category,
+      motif: def.motif,
+      bonus: true,
+      target: def.target,
+      evaluate: () => ({
+        current: clampedCurrent,
+        unlockedAt: resolveFellowshipUnlockDate(unlocked),
+      }),
+    };
+
+    return {
+      definition,
+      unlocked,
+      unlockedAt: resolveFellowshipUnlockDate(unlocked),
+      current: clampedCurrent,
+      target: def.target,
       percentage,
     };
   });

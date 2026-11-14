@@ -26,6 +26,8 @@ rules_version = '2';
 //          - shelfPlanIds: list (optional, 0..100 items, each string matching ^[a-z0-9-]{1,64}$)
 //          - friendPrivacy: map (optional, exact 7 bool keys: sharingEnabled, showPhoto,
 //              showStreak, showRecentBook, showBookProgress, showSealsCount, showActivePlan)
+//          - fellowshipStats: map (optional, exact 3 int keys 0..100000: friendsPeak,
+//              cohortsPeak, encouragementsSent)
 //      - colorScheme: string (required, one of: 'system', 'light', 'dark')
 //      - createdAt: timestamp (required, immutable, must equal request.time on create)
 //      - updatedAt: timestamp (required, must equal request.time on create and update)
@@ -142,6 +144,65 @@ rules_version = '2';
 //      - createdAt: timestamp (required, immutable, must equal request.time on create)
 //      - acceptedAt: timestamp | null (required key, null while pending, == request.time on accept)
 //      - updatedAt: timestamp (required, must equal request.time on create and update)
+//
+// 8. Collection: sharedPlans
+//    Document ID: {cohortId} (4..40 chars, ^[a-z0-9-]{4,40}$)
+//    Access: Participants (`request.auth.uid in participantUids`) may `get` and `list`
+//            (when queried with `where('participantUids', 'array-contains', uid)`).
+//            Non-existent `get` is permitted for authenticated pre-create ID checks.
+//            Only the host (`hostUid == request.auth.uid`) may create, update cohort
+//            metadata/participants, or delete; non-host participants may update only
+//            to remove themselves from `participantUids`.
+//    Fields:
+//      - id: string (required, immutable, == {cohortId}, ^[a-z0-9-]{4,40}$)
+//      - hostUid: string (required, immutable, == request.auth.uid on create, ^[a-zA-Z0-9:-]{1,128}$)
+//      - hostName: string (required, 0..100 chars)
+//      - planType: string (required, immutable, 'builtin' or 'custom')
+//      - sourcePlanId: string (required, immutable, 1..64 chars, ^[a-zA-Z0-9_-]{1,64}$)
+//      - title: string (required, immutable, 1..80 chars)
+//      - description: string (required, immutable, 0..280 chars)
+//      - sectionsSpec: string (required, immutable, '' if builtin else 1..2000 chars spec)
+//      - durationDays: int (required, immutable, 1..1189)
+//      - accentColor: string (required, immutable, allowed CSS custom property token)
+//      - participantUids: list of 1..12 UID strings (required, must include hostUid)
+//      - createdAt: timestamp (required, immutable, must equal request.time on create)
+//      - updatedAt: timestamp (required, must equal request.time on create and update)
+//
+// 9. Subcollection: sharedPlans/{cohortId}/members
+//    Document ID: {memberUid} (1..128 chars, ^[a-zA-Z0-9:-]{1,128}$)
+//    Access: Cohort participants may `read` (`get` and `list`). Host may invite accepted
+//            unblocked friends in `'invited'` status with zeroed progress; member may join
+//            (`'invited'` -> `'joined'`), update their own progress, or delete their own doc.
+//    Fields:
+//      - uid: string (required, immutable, == {memberUid}, ^[a-zA-Z0-9:-]{1,128}$)
+//      - cohortId: string (required, immutable, == {cohortId}, ^[a-z0-9-]{4,40}$)
+//      - displayName: string (required, 0..100 chars)
+//      - photoURL: string | null (required key, null or https:// URL 1..1000 chars)
+//      - status: string (required, 'invited' or 'joined', cannot revert from 'joined')
+//      - completedDays: int (required, 0..totalDays)
+//      - totalDays: int (required, 1..1189)
+//      - readChapters: int (required, 0..totalChapters)
+//      - totalChapters: int (required, 1..1189)
+//      - lastReadDate: string | null (required key, null or YYYY-MM-DD calendar date)
+//      - joinedAt: timestamp | null (required key, null if invited, server timestamp when joining, immutable once set)
+//      - updatedAt: timestamp (required, must equal request.time on create and update)
+//
+// 10. Subcollection: friendProfiles/{recipientUid}/encouragements
+//     Document ID: {senderUid} (1..128 chars, != {recipientUid})
+//     Access: Recipient may `get`, `list`, and acknowledge (`acknowledgedAt` only).
+//             Sender may `get` their own sent doc, create when accepted & unblocked friend
+//             (`sentCount == 1`), and update after a 12-hour rate limit (`sentCount + 1`).
+//             Delete is disallowed (`allow delete: if false`) to preserve rate-limit state.
+//     Fields:
+//       - senderUid: string (required, immutable, == {senderUid}, != {recipientUid})
+//       - recipientUid: string (required, immutable, == {recipientUid})
+//       - senderName: string (required, 0..100 chars)
+//       - senderPhotoURL: string | null (required key, null or https:// URL 1..1000 chars)
+//       - presetId: string (required, one of: 'praying', 'alongside', 'keep-going', 'grace-peace')
+//       - cohortTitle: string | null (required key, null or 1..80 chars)
+//       - sentCount: int (required, 1..100000, increments by +1 on sender update)
+//       - sentAt: timestamp (required, must equal request.time on create and sender update)
+//       - acknowledgedAt: timestamp | null (required key, null on send, == request.time on ack)
 //
 // ===============================================================
 
@@ -281,6 +342,30 @@ service cloud.firestore {
         get(/databases/$(database)/documents/friendships/$(friendPairId(request.auth.uid, targetUid))).data.status == 'accepted';
     }
 
+    // Validate shared cohort ID format (4..40 chars, lowercase alphanumeric + hyphen)
+    function isValidCohortId(cohortId) {
+      return cohortId is string &&
+        cohortId.size() >= 4 &&
+        cohortId.size() <= 40 &&
+        cohortId.matches("^[a-z0-9-]{4,40}$");
+    }
+
+    // Check if the authenticated user is a listed participant of sharedPlans/{cohortId}
+    function isCohortParticipant(cohortId) {
+      return isAuthenticated() &&
+        isValidCohortId(cohortId) &&
+        exists(/databases/$(database)/documents/sharedPlans/$(cohortId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/sharedPlans/$(cohortId)).data.participantUids;
+    }
+
+    // Check if the authenticated user is the host of sharedPlans/{cohortId}
+    function isCohortHost(cohortId) {
+      return isAuthenticated() &&
+        isValidCohortId(cohortId) &&
+        exists(/databases/$(database)/documents/sharedPlans/$(cohortId)) &&
+        get(/databases/$(database)/documents/sharedPlans/$(cohortId)).data.hostUid == request.auth.uid;
+    }
+
     // ===============================================================
     // Domain Validators (Used in BOTH create and update)
     // ===============================================================
@@ -375,6 +460,15 @@ service cloud.firestore {
         privacy.showActivePlan is bool;
     }
 
+    function isValidFellowshipStats(stats) {
+      let keys = ['friendsPeak', 'cohortsPeak', 'encouragementsSent'];
+      return isValidMap(stats, keys) &&
+        stats.keys().hasAll(keys) &&
+        isIntInRange(stats.friendsPeak, 0, 100000) &&
+        isIntInRange(stats.cohortsPeak, 0, 100000) &&
+        isIntInRange(stats.encouragementsSent, 0, 100000);
+    }
+
     function isValidPreferences(prefs) {
       let allowedPrefKeys = [
         'streakGraceEnabled',
@@ -382,7 +476,8 @@ service cloud.firestore {
         'activePlanId',
         'seenAchievementIds',
         'shelfPlanIds',
-        'friendPrivacy'
+        'friendPrivacy',
+        'fellowshipStats'
       ];
       let requiredPrefKeys = [
         'streakGraceEnabled',
@@ -400,7 +495,8 @@ service cloud.firestore {
            prefs.activePlanId.size() <= 64)) &&
         isValidSeenAchievementIds(prefs.seenAchievementIds) &&
         (!('shelfPlanIds' in prefs) || isValidShelfPlanIds(prefs.shelfPlanIds)) &&
-        (!('friendPrivacy' in prefs) || isValidFriendPrivacy(prefs.friendPrivacy));
+        (!('friendPrivacy' in prefs) || isValidFriendPrivacy(prefs.friendPrivacy)) &&
+        (!('fellowshipStats' in prefs) || isValidFellowshipStats(prefs.fellowshipStats));
     }
 
     function isValidUser(data, userId) {
@@ -690,6 +786,134 @@ service cloud.firestore {
         data.createdAt is timestamp;
     }
 
+    function isValidNonEmptyParticipantUidList(uids) {
+      let joined = uids.join(',');
+      return joined.size() <= 1547 &&
+        joined.matches("^[a-zA-Z0-9:-]{1,128}(,[a-zA-Z0-9:-]{1,128})*$") &&
+        joined.split(',') == uids;
+    }
+
+    function isValidSharedPlan(data, cohortId) {
+      let keys = [
+        'id',
+        'hostUid',
+        'hostName',
+        'planType',
+        'sourcePlanId',
+        'title',
+        'description',
+        'sectionsSpec',
+        'durationDays',
+        'accentColor',
+        'participantUids',
+        'createdAt',
+        'updatedAt'
+      ];
+      return hasOnlyAllowedFields(keys) &&
+        hasRequiredFields(keys) &&
+        isValidCohortId(cohortId) &&
+        isValidCohortId(data.id) &&
+        data.id == cohortId &&
+        isValidUidString(data.hostUid) &&
+        isValidDisplayName(data.hostName) &&
+        data.planType is string &&
+        data.planType in ['builtin', 'custom'] &&
+        data.sourcePlanId is string &&
+        data.sourcePlanId.size() >= 1 &&
+        data.sourcePlanId.size() <= 64 &&
+        data.sourcePlanId.matches("^[a-zA-Z0-9_-]{1,64}$") &&
+        data.title is string &&
+        data.title.size() >= 1 &&
+        data.title.size() <= 80 &&
+        data.description is string &&
+        data.description.size() <= 280 &&
+        data.sectionsSpec is string &&
+        ((data.planType == 'builtin' && data.sectionsSpec == '') ||
+         (data.planType == 'custom' &&
+          data.sectionsSpec.size() >= 1 &&
+          data.sectionsSpec.size() <= 2000 &&
+          data.sectionsSpec.matches("^[a-z0-9-]+(:[0-9]+(-[0-9]+)?)?(,[a-z0-9-]+(:[0-9]+(-[0-9]+)?)?)*$"))) &&
+        isIntInRange(data.durationDays, 1, 1189) &&
+        isValidPlanAccentColor(data.accentColor) &&
+        data.participantUids is list &&
+        data.participantUids.size() >= 1 &&
+        data.participantUids.size() <= 12 &&
+        data.hostUid in data.participantUids &&
+        isValidNonEmptyParticipantUidList(data.participantUids) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSharedPlanMember(data, cohortId, memberUid) {
+      let keys = [
+        'uid',
+        'cohortId',
+        'displayName',
+        'photoURL',
+        'status',
+        'completedDays',
+        'totalDays',
+        'readChapters',
+        'totalChapters',
+        'lastReadDate',
+        'joinedAt',
+        'updatedAt'
+      ];
+      return hasOnlyAllowedFields(keys) &&
+        hasRequiredFields(keys) &&
+        isValidCohortId(cohortId) &&
+        isValidUidString(memberUid) &&
+        data.uid is string &&
+        data.uid == memberUid &&
+        data.cohortId is string &&
+        data.cohortId == cohortId &&
+        isValidDisplayName(data.displayName) &&
+        isValidOptionalPhotoUrl(data.photoURL) &&
+        data.status is string &&
+        data.status in ['invited', 'joined'] &&
+        isIntInRange(data.totalDays, 1, 1189) &&
+        isIntInRange(data.completedDays, 0, data.totalDays) &&
+        isIntInRange(data.totalChapters, 1, 1189) &&
+        isIntInRange(data.readChapters, 0, data.totalChapters) &&
+        (data.lastReadDate == null || isValidPlainDate(data.lastReadDate)) &&
+        (data.status == 'invited' ? data.joinedAt == null : data.joinedAt is timestamp) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidEncouragement(data, recipientUid, senderUid) {
+      let keys = [
+        'senderUid',
+        'recipientUid',
+        'senderName',
+        'senderPhotoURL',
+        'presetId',
+        'cohortTitle',
+        'sentCount',
+        'sentAt',
+        'acknowledgedAt'
+      ];
+      return hasOnlyAllowedFields(keys) &&
+        hasRequiredFields(keys) &&
+        isValidUidString(senderUid) &&
+        isValidUidString(recipientUid) &&
+        senderUid != recipientUid &&
+        data.senderUid is string &&
+        data.senderUid == senderUid &&
+        data.recipientUid is string &&
+        data.recipientUid == recipientUid &&
+        isValidDisplayName(data.senderName) &&
+        isValidOptionalPhotoUrl(data.senderPhotoURL) &&
+        data.presetId is string &&
+        data.presetId in ['praying', 'alongside', 'keep-going', 'grace-peace'] &&
+        (data.cohortTitle == null ||
+          (data.cohortTitle is string &&
+           data.cohortTitle.size() >= 1 &&
+           data.cohortTitle.size() <= 80)) &&
+        isIntInRange(data.sentCount, 1, 100000) &&
+        data.sentAt is timestamp &&
+        (data.acknowledgedAt == null || data.acknowledgedAt is timestamp);
+    }
+
     // ===============================================================
     // Collection Rules
     // ===============================================================
@@ -814,6 +1038,43 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /friendProfiles/{recipientUid}/encouragements/{senderUid} {
+      allow get: if isOwner(recipientUid) || isOwner(senderUid);
+      allow list: if isOwner(recipientUid);
+
+      allow create: if isOwner(senderUid) &&
+        senderUid != recipientUid &&
+        isAcceptedFriend(recipientUid) &&
+        !exists(/databases/$(database)/documents/users/$(recipientUid)/blockedUsers/$(senderUid)) &&
+        !exists(/databases/$(database)/documents/users/$(senderUid)/blockedUsers/$(recipientUid)) &&
+        isValidEncouragement(request.resource.data, recipientUid, senderUid) &&
+        request.resource.data.sentCount == 1 &&
+        request.resource.data.acknowledgedAt == null &&
+        isServerTimestamp(request.resource.data.sentAt);
+
+      allow update: if (isOwner(senderUid) &&
+          resource != null &&
+          senderUid != recipientUid &&
+          isAcceptedFriend(recipientUid) &&
+          !exists(/databases/$(database)/documents/users/$(recipientUid)/blockedUsers/$(senderUid)) &&
+          !exists(/databases/$(database)/documents/users/$(senderUid)/blockedUsers/$(recipientUid)) &&
+          resource.data.sentAt is timestamp &&
+          request.time >= resource.data.sentAt + duration.value(12, 'h') &&
+          areImmutableFieldsUnchanged(['senderUid', 'recipientUid']) &&
+          isValidEncouragement(request.resource.data, recipientUid, senderUid) &&
+          request.resource.data.sentCount == resource.data.sentCount + 1 &&
+          request.resource.data.acknowledgedAt == null &&
+          isServerTimestamp(request.resource.data.sentAt)) ||
+        (isOwner(recipientUid) &&
+          resource != null &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acknowledgedAt']) &&
+          isValidEncouragement(request.resource.data, recipientUid, senderUid) &&
+          isServerTimestamp(request.resource.data.acknowledgedAt));
+
+      // Prevent delete-and-recreate bypass of the 12-hour encouragement rate limit.
+      allow delete: if false;
+    }
+
     match /friendships/{pairId} {
       // Participants may inspect their own friendship pair (including pre-create existence checks).
       allow get: if isAuthenticated() &&
@@ -857,6 +1118,94 @@ service cloud.firestore {
       allow delete: if isAuthenticated() &&
         resource != null &&
         request.auth.uid in resource.data.users;
+    }
+
+    match /sharedPlans/{cohortId} {
+      // Participants may read cohorts they belong to; non-existent get allowed for ID checks.
+      allow get: if isAuthenticated() &&
+        (resource == null || request.auth.uid in resource.data.participantUids);
+
+      // Queries must filter with where('participantUids', 'array-contains', request.auth.uid).
+      allow list: if isAuthenticated() &&
+        request.auth.uid in resource.data.participantUids;
+
+      allow create: if isAuthenticated() &&
+        request.resource.data.hostUid == request.auth.uid &&
+        isValidSharedPlan(request.resource.data, cohortId) &&
+        isServerTimestamp(request.resource.data.createdAt) &&
+        isServerTimestamp(request.resource.data.updatedAt);
+
+      allow update: if (isAuthenticated() &&
+          resource != null &&
+          resource.data.hostUid == request.auth.uid &&
+          areImmutableFieldsUnchanged([
+            'id',
+            'hostUid',
+            'planType',
+            'sourcePlanId',
+            'title',
+            'description',
+            'sectionsSpec',
+            'durationDays',
+            'accentColor',
+            'createdAt'
+          ]) &&
+          isValidSharedPlan(request.resource.data, cohortId) &&
+          isServerTimestamp(request.resource.data.updatedAt)) ||
+        (isAuthenticated() &&
+          resource != null &&
+          request.auth.uid in resource.data.participantUids &&
+          request.auth.uid != resource.data.hostUid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participantUids', 'updatedAt']) &&
+          request.resource.data.participantUids == resource.data.participantUids.removeAll([request.auth.uid]) &&
+          isValidSharedPlan(request.resource.data, cohortId) &&
+          isServerTimestamp(request.resource.data.updatedAt));
+
+      allow delete: if isAuthenticated() &&
+        resource != null &&
+        resource.data.hostUid == request.auth.uid;
+
+      match /members/{memberUid} {
+        allow read: if isAuthenticated() && isCohortParticipant(cohortId);
+
+        allow create: if isAuthenticated() &&
+          isValidSharedPlanMember(request.resource.data, cohortId, memberUid) &&
+          isServerTimestamp(request.resource.data.updatedAt) &&
+          exists(/databases/$(database)/documents/sharedPlans/$(cohortId)) &&
+          memberUid in get(/databases/$(database)/documents/sharedPlans/$(cohortId)).data.participantUids &&
+          ((isCohortHost(cohortId) &&
+            ((memberUid == request.auth.uid &&
+              request.resource.data.status == 'joined' &&
+              isServerTimestamp(request.resource.data.joinedAt)) ||
+             (memberUid != request.auth.uid &&
+              isAcceptedFriend(memberUid) &&
+              !exists(/databases/$(database)/documents/users/$(memberUid)/blockedUsers/$(request.auth.uid)) &&
+              !exists(/databases/$(database)/documents/users/$(request.auth.uid)/blockedUsers/$(memberUid)) &&
+              request.resource.data.status == 'invited' &&
+              request.resource.data.completedDays == 0 &&
+              request.resource.data.readChapters == 0 &&
+              request.resource.data.lastReadDate == null))) ||
+           (isOwner(memberUid) &&
+            isCohortParticipant(cohortId) &&
+            request.resource.data.status == 'joined' &&
+            isServerTimestamp(request.resource.data.joinedAt)));
+
+        allow update: if isOwner(memberUid) &&
+          resource != null &&
+          isCohortParticipant(cohortId) &&
+          areImmutableFieldsUnchanged(['uid', 'cohortId']) &&
+          isValidSharedPlanMember(request.resource.data, cohortId, memberUid) &&
+          isServerTimestamp(request.resource.data.updatedAt) &&
+          (resource.data.joinedAt == null
+            ? (request.resource.data.status == 'joined'
+                ? isServerTimestamp(request.resource.data.joinedAt)
+                : request.resource.data.joinedAt == null)
+            : request.resource.data.joinedAt == resource.data.joinedAt);
+
+        allow delete: if isAuthenticated() &&
+          resource != null &&
+          (isOwner(memberUid) || isCohortHost(cohortId));
+      }
     }
 
     // ===============================================================
