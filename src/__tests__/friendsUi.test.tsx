@@ -269,7 +269,7 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
     expect(navButtons).toHaveLength(4);
   });
 
-  it('searches readers live by name or @username, sends an inline Add friend request, and edits @username', async () => {
+  it('searches readers live by name or @username, sends an inline Add friend request, and manages @username in Settings', async () => {
     friendsMocks.fetchSuggestedReaders.mockResolvedValue([RUTH_ENTRY]);
     friendsMocks.searchReaderDirectory.mockResolvedValue([RUTH_ENTRY]);
     friendsMocks.sendFriendRequest.mockResolvedValue({ outcome: 'sent' });
@@ -287,8 +287,11 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Open Reading Circle' }));
 
-    // Own @handle pill shows cleanly without any 8-char friend code
-    expect(await screen.findByRole('button', { name: /@hannah/i })).toBeInTheDocument();
+    // Own @handle badge shows read-only without username editor or privacy controls on Friends page
+    expect(await screen.findByText('@hannah')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /@hannah/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Privacy/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Your @username')).not.toBeInTheDocument();
     expect(screen.queryByText(/Share invite link/i)).not.toBeInTheDocument();
 
     // Suggested readers ("People you may know") appear before searching
@@ -362,9 +365,15 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
       expect(friendsMocks.deleteFriendship).toHaveBeenCalledWith('uid_hannah_uid_ruth');
     });
 
-    // Edit own @username with live availability check
-    fireEvent.click(screen.getByRole('button', { name: /@hannah/i }));
+    // Navigate to Settings -> edit own @username with live availability check
+    fireEvent.click(screen.getByRole('button', { name: /Open account and cloud sync/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Settings/i }, { timeout: 3000 }));
+    expect(
+      await screen.findByRole('heading', { name: /Username & privacy/i })
+    ).toBeInTheDocument();
+
     const handleInput = await screen.findByLabelText('Your @username');
+    expect(handleInput).toHaveValue('hannah');
     fireEvent.change(handleInput, { target: { value: 'hannah.reads' } });
 
     await waitFor(() => {
@@ -385,10 +394,10 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
       );
     });
     expect(await screen.findByText('Username saved as @hannah.reads')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /@hannah\.reads/i })).toBeInTheDocument();
+    expect(screen.getByText('@hannah.reads')).toBeInTheDocument();
   });
 
-  it('handles incoming/outgoing requests, inspects Friend Folio & MiniCanonicalSpine, and toggles search privacy', async () => {
+  it('handles incoming/outgoing requests, inspects Friend Folio & MiniCanonicalSpine, and toggles search privacy in Settings', async () => {
     const incomingFromMiriam: FriendshipRecord = {
       id: 'uid_hannah_uid_miriam',
       users: ['uid_hannah', 'uid_miriam'],
@@ -502,9 +511,10 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
       expect(friendsMocks.deleteFriendship).toHaveBeenCalledWith('uid_hannah_uid_miriam');
     });
 
-    // Toggle Circle privacy (both people search discoverability & reading metrics)
-    fireEvent.click(screen.getByRole('button', { name: 'Privacy' }));
-    const discoverableCheckbox = screen.getByRole('checkbox', {
+    // Navigate to Settings -> Toggle Circle privacy (both people search discoverability & reading metrics)
+    fireEvent.click(screen.getByRole('button', { name: /Open account and cloud sync/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Settings/i }, { timeout: 3000 }));
+    const discoverableCheckbox = await screen.findByRole('checkbox', {
       name: /Appear in people search/i,
     });
     expect(discoverableCheckbox).toBeChecked();
@@ -595,7 +605,7 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Settings/i }, { timeout: 3000 }));
     const circleLink = await screen.findByRole(
       'button',
-      { name: /Reading Circle & privacy/i },
+      { name: /Open Reading Circle/i },
       { timeout: 3000 }
     );
     fireEvent.click(circleLink);

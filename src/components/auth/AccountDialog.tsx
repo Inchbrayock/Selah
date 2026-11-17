@@ -808,7 +808,7 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
                       Settings
                     </span>
                     <span className="block truncate text-xs text-[var(--text-secondary)]">
-                      Theme, reading cadence, data &amp; updates
+                      Username, privacy, theme, cadence &amp; updates
                     </span>
                   </span>
                 </span>

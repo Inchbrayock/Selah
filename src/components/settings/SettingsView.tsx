@@ -1,9 +1,10 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowLeft,
   BookOpen,
   Camera,
+  Check,
   Cloud,
   Database,
   Download,
@@ -11,6 +12,7 @@ import {
   Moon,
   Palette,
   RefreshCw,
+  Shield,
   SlidersHorizontal,
   Sun,
   Trash2,
@@ -18,11 +20,17 @@ import {
   Users,
 } from 'lucide-react';
 import { exportSanctuaryBackupFile } from '../../lib/backupFile';
+import {
+  formatUsernameHandle,
+  normalizeUsernameInput,
+  validateUsername,
+} from '../../lib/friends';
 import { SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
 import { getSystemPrefersDark } from '../../lib/theme';
 import { useAppUpdater } from '../../lib/useAppUpdater';
 import { useBibleStore } from '../../store/useBibleStore';
 import type { ColorSchemePreference } from '../../types/bible';
+import { FriendPrivacyPanel } from '../friends/FriendPrivacyPanel';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
 
 interface SettingsViewProps {
@@ -39,6 +47,7 @@ const SECTION_LINKS: {
   icon: React.ComponentType<{ className?: string }>;
 }[] = [
   { id: 'settings-account', label: 'Cloud account', icon: Cloud },
+  { id: 'settings-privacy', label: 'Username & privacy', icon: Shield },
   { id: 'settings-appearance', label: 'Appearance', icon: Palette },
   { id: 'settings-cadence', label: 'Reading cadence', icon: SlidersHorizontal },
   { id: 'settings-data', label: 'Data & portability', icon: Database },
@@ -53,12 +62,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onOpenFriends,
 }) => {
   const {
+    firebaseAvailable,
     user,
     syncStatus,
     colorScheme,
     setColorScheme,
     preferences,
     updatePreferences,
+    ownFriendProfile,
+    friendsError,
+    ensureFriendProfileReady,
+    checkUsernameAvailability,
+    updateUsername,
     exportBackupJson,
     importBackupJson,
     activateDemoJourney,
@@ -79,11 +94,144 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   } = useAppUpdater();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const handleCheckTokenRef = useRef(0);
+  const handleStatusTimerRef = useRef<number | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
 
+  const [handleDraft, setHandleDraft] = useState(() => ownFriendProfile?.username ?? '');
+  const [handleDirty, setHandleDirty] = useState(false);
+  const [handleCheck, setHandleCheck] = useState<{
+    checking: boolean;
+    available: boolean | null;
+    message: string | null;
+  }>({ checking: false, available: null, message: null });
+  const [handleSaving, setHandleSaving] = useState(false);
+  const [handleStatus, setHandleStatus] = useState<string | null>(null);
+
   const systemDark = getSystemPrefersDark();
+  const ownHandle = formatUsernameHandle(ownFriendProfile?.username);
+  const normalizedDraft = normalizeUsernameInput(handleDraft);
+  const currentUsername = ownFriendProfile?.username ?? '';
+  const handleUnchanged = Boolean(currentUsername && normalizedDraft === currentUsername);
+
+  useEffect(() => {
+    if (firebaseAvailable && user && !ownFriendProfile) {
+      void ensureFriendProfileReady();
+    }
+  }, [ensureFriendProfileReady, firebaseAvailable, ownFriendProfile, user]);
+
+  useEffect(() => {
+    setHandleDirty(false);
+    setHandleDraft(ownFriendProfile?.username ?? '');
+    setHandleCheck({ checking: false, available: null, message: null });
+    setHandleStatus(null);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!handleDirty) {
+      setHandleDraft(ownFriendProfile?.username ?? '');
+    }
+  }, [handleDirty, ownFriendProfile?.username]);
+
+  useEffect(() => {
+    return () => {
+      if (handleStatusTimerRef.current !== null) {
+        window.clearTimeout(handleStatusTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseAvailable || !user || !handleDirty) return;
+    const normalized = normalizeUsernameInput(handleDraft);
+    const current = ownFriendProfile?.username ?? '';
+    const token = ++handleCheckTokenRef.current;
+
+    if (!normalized) {
+      setHandleCheck({ checking: false, available: null, message: null });
+      return;
+    }
+    const validation = validateUsername(normalized);
+    if (!validation.ok) {
+      setHandleCheck({ checking: false, available: false, message: validation.error });
+      return;
+    }
+    if (validation.username === current) {
+      setHandleCheck({
+        checking: false,
+        available: true,
+        message: 'Your current username',
+      });
+      return;
+    }
+
+    setHandleCheck({ checking: true, available: null, message: 'Checking availability…' });
+    const timer = window.setTimeout(() => {
+      void checkUsernameAvailability(validation.username)
+        .then((res) => {
+          if (handleCheckTokenRef.current !== token) return;
+          if (res.available) {
+            setHandleCheck({
+              checking: false,
+              available: true,
+              message: `@${res.normalized} is available`,
+            });
+          } else {
+            setHandleCheck({
+              checking: false,
+              available: false,
+              message: res.error ?? `@${res.normalized} is already taken.`,
+            });
+          }
+        })
+        .catch(() => {
+          if (handleCheckTokenRef.current !== token) return;
+          setHandleCheck({ checking: false, available: null, message: null });
+        });
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    checkUsernameAvailability,
+    firebaseAvailable,
+    handleDirty,
+    handleDraft,
+    ownFriendProfile?.username,
+    user,
+  ]);
+
+  const handleSaveHandle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (handleSaving) return;
+    const validation = validateUsername(handleDraft);
+    if (!validation.ok) {
+      setHandleCheck({ checking: false, available: false, message: validation.error });
+      return;
+    }
+    setHandleSaving(true);
+    setHandleStatus(null);
+    try {
+      await updateUsername(validation.username);
+      setHandleDirty(false);
+      setHandleDraft(validation.username);
+      setHandleCheck({ checking: false, available: null, message: null });
+      setHandleStatus(`Username saved as @${validation.username}`);
+      if (handleStatusTimerRef.current !== null) {
+        window.clearTimeout(handleStatusTimerRef.current);
+      }
+      handleStatusTimerRef.current = window.setTimeout(() => setHandleStatus(null), 3500);
+    } catch (err) {
+      setHandleCheck({
+        checking: false,
+        available: false,
+        message: err instanceof Error ? err.message : 'Could not save username.',
+      });
+    } finally {
+      setHandleSaving(false);
+    }
+  };
 
   const handleExport = async () => {
     try {
@@ -177,7 +325,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               Sanctuary Settings
             </h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              Appearance, cloud account sync, reading cadence, data backup, and updates.
+              Username, privacy, appearance, cloud sync, reading cadence, data backup, and updates.
             </p>
           </div>
           <span className="font-mono text-xs text-[var(--text-secondary)]">
@@ -231,6 +379,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 >
                   {user ? user.displayName || user.email || 'Signed in' : 'Cloud account sync'}
                 </h2>
+                {user && ownHandle && (
+                  <p className="mt-0.5 truncate text-xs font-medium text-[var(--color-accent)]">
+                    {ownHandle}
+                  </p>
+                )}
                 <p className="mt-0.5 text-xs leading-relaxed text-[var(--text-secondary)]">
                   {user
                     ? `Backing up to ${user.email ?? 'your account'} (${syncStatus}).`
@@ -263,7 +416,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-canvas)] sm:min-h-9"
                 >
                   <Users className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
-                  <span>Reading Circle &amp; privacy</span>
+                  <span>Open Reading Circle</span>
                 </button>
               )}
             </div>
@@ -272,6 +425,150 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         {/* Main Settings Sections */}
         <div className="space-y-6 lg:col-span-8">
+          {/* Username & Circle Privacy */}
+          <section
+            id="settings-privacy"
+            className="folio-sheet scroll-mt-20 space-y-5 p-5 sm:p-6"
+            aria-labelledby="settings-privacy-heading"
+          >
+            <div>
+              <h2
+                id="settings-privacy-heading"
+                className="font-display text-xl font-medium text-[var(--text-primary)]"
+              >
+                Username &amp; privacy
+              </h2>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
+                Choose your @username handle, whether readers can find you in search, and what
+                accepted friends see.
+              </p>
+            </div>
+
+            {!firebaseAvailable ? (
+              <p className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-4 py-3 text-xs leading-relaxed text-[var(--text-secondary)]">
+                Usernames and circle privacy require Firebase cloud sync to be configured.
+              </p>
+            ) : !user ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-4">
+                <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
+                  Sign in to claim a @username handle and manage Reading Circle privacy settings.
+                </p>
+                <button
+                  type="button"
+                  onClick={onOpenAccount}
+                  className="btn-primary inline-flex min-h-9 shrink-0 items-center justify-center rounded-md px-3.5 py-1.5 text-xs font-medium"
+                >
+                  Sign in
+                </button>
+              </div>
+            ) : (
+              <>
+                {friendsError && (
+                  <p
+                    role="alert"
+                    className="rounded-md border border-[var(--color-crimson)] bg-[var(--bg-canvas)] px-3.5 py-2.5 text-xs font-medium text-[var(--color-crimson)]"
+                  >
+                    {friendsError}
+                  </p>
+                )}
+
+                <form
+                  onSubmit={(e) => void handleSaveHandle(e)}
+                  className="space-y-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-4"
+                >
+                  <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+                    <div className="flex-1 space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <label
+                          htmlFor="username-handle-input"
+                          className="block text-sm font-medium text-[var(--text-primary)]"
+                        >
+                          Your @username
+                        </label>
+                        {!ownFriendProfile && (
+                          <span className="text-xs text-[var(--text-secondary)]">
+                            Preparing your @username…
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
+                        Choose a handle (3–24 letters, numbers, periods, or underscores) so friends
+                        can find you easily.
+                      </p>
+                      <div className="relative mt-1.5 flex items-center">
+                        <span
+                          aria-hidden="true"
+                          className="pointer-events-none absolute left-3 text-sm text-[var(--text-secondary)]"
+                        >
+                          @
+                        </span>
+                        <input
+                          id="username-handle-input"
+                          type="text"
+                          value={handleDraft}
+                          onChange={(e) => {
+                            setHandleDirty(true);
+                            setHandleStatus(null);
+                            setHandleDraft(normalizeUsernameInput(e.target.value));
+                          }}
+                          maxLength={24}
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          placeholder="hannah.miller"
+                          className="folio-input min-h-10 w-full py-1.5 pl-7 pr-3 text-base sm:max-w-sm sm:text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={
+                        handleSaving ||
+                        handleCheck.checking ||
+                        handleCheck.available === false ||
+                        !normalizedDraft ||
+                        handleUnchanged
+                      }
+                      className="btn-primary min-h-10 shrink-0 rounded-md px-3.5 py-2 text-xs font-medium disabled:opacity-55 sm:min-h-9"
+                    >
+                      {handleSaving ? 'Saving…' : 'Save username'}
+                    </button>
+                  </div>
+
+                  {handleCheck.message && (
+                    <p
+                      role="status"
+                      className={`text-xs font-medium ${
+                        handleCheck.available === true
+                          ? 'text-[var(--color-sage)]'
+                          : handleCheck.available === false
+                            ? 'text-[var(--color-crimson)]'
+                            : 'text-[var(--text-secondary)]'
+                      }`}
+                    >
+                      {handleCheck.message}
+                    </p>
+                  )}
+
+                  {handleStatus && (
+                    <p
+                      role="status"
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-sage)]"
+                    >
+                      <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>{handleStatus}</span>
+                    </p>
+                  )}
+                </form>
+
+                <div className="border-t border-[var(--border-subtle)] pt-5">
+                  <FriendPrivacyPanel embedded />
+                </div>
+              </>
+            )}
+          </section>
+
           {/* Theme Swatches */}
           <section
             id="settings-appearance"

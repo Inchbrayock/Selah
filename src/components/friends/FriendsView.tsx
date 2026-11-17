@@ -1,13 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { motion } from 'motion/react';
 import {
   ArrowLeft,
   AtSign,
   Check,
   CloudOff,
-  Edit3,
   Search,
-  Shield,
   UserCheck,
   UserPlus,
   Users,
@@ -18,12 +16,10 @@ import { formatPlainDate } from '../../lib/dates';
 import {
   formatUsernameHandle,
   matchesDirectoryQuery,
-  normalizeUsernameInput,
   rankDirectoryMatch,
   sanitizeFriendPrivacy,
-  validateUsername,
 } from '../../lib/friends';
-import { FOLIO_EASE, SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
+import { SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
 import { useBibleStore } from '../../store/useBibleStore';
 import type {
   FriendConnection,
@@ -36,7 +32,6 @@ import { ProfileAvatar } from '../ui/ProfileAvatar';
 import { SanctuaryLamp } from '../ui/SanctuaryLamp';
 import { EncouragementSlipsPanel } from './EncouragementSlipsPanel';
 import { FriendFolioDialog } from './FriendFolioDialog';
-import { FriendPrivacyPanel } from './FriendPrivacyPanel';
 import { MiniCanonicalSpine } from './MiniCanonicalSpine';
 
 interface FriendsViewProps {
@@ -79,25 +74,12 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     ensureFriendProfileReady,
     searchReaders,
     loadSuggestedReaders,
-    checkUsernameAvailability,
-    updateUsername,
     sendFriendRequest,
     acceptFriendRequest,
     declineFriendRequest,
     cancelFriendRequest,
     blockFriend,
   } = useBibleStore();
-
-  const [privacyOpen, setPrivacyOpen] = useState(false);
-  const [editingHandle, setEditingHandle] = useState(false);
-  const [handleDraft, setHandleDraft] = useState('');
-  const [handleCheck, setHandleCheck] = useState<{
-    checking: boolean;
-    available: boolean | null;
-    message: string | null;
-  }>({ checking: false, available: null, message: null });
-  const [handleSaving, setHandleSaving] = useState(false);
-  const [handleStatus, setHandleStatus] = useState<string | null>(null);
 
   const [peopleQuery, setPeopleQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ReaderDirectoryEntry[]>([]);
@@ -116,7 +98,6 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
   const [selectedFriendUid, setSelectedFriendUid] = useState<string | null>(null);
 
   const searchTokenRef = useRef(0);
-  const handleCheckTokenRef = useRef(0);
 
   const ownPrivacy = sanitizeFriendPrivacy(preferences.friendPrivacy);
   const ownHandle = formatUsernameHandle(ownFriendProfile?.username);
@@ -205,59 +186,6 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     }, 220);
     return () => window.clearTimeout(timer);
   }, [executeSearch, peopleQuery]);
-
-  // Live debounced username availability check while editing handle
-  useEffect(() => {
-    if (!editingHandle) return;
-    const normalized = normalizeUsernameInput(handleDraft);
-    const current = ownFriendProfile?.username ?? '';
-    const token = ++handleCheckTokenRef.current;
-
-    if (!normalized) {
-      setHandleCheck({ checking: false, available: null, message: null });
-      return;
-    }
-    const validation = validateUsername(normalized);
-    if (!validation.ok) {
-      setHandleCheck({ checking: false, available: false, message: validation.error });
-      return;
-    }
-    if (validation.username === current) {
-      setHandleCheck({
-        checking: false,
-        available: true,
-        message: 'Your current username',
-      });
-      return;
-    }
-
-    setHandleCheck({ checking: true, available: null, message: 'Checking availability…' });
-    const timer = window.setTimeout(() => {
-      void checkUsernameAvailability(validation.username)
-        .then((res) => {
-          if (handleCheckTokenRef.current !== token) return;
-          if (res.available) {
-            setHandleCheck({
-              checking: false,
-              available: true,
-              message: `@${res.normalized} is available`,
-            });
-          } else {
-            setHandleCheck({
-              checking: false,
-              available: false,
-              message: res.error ?? `@${res.normalized} is already taken.`,
-            });
-          }
-        })
-        .catch(() => {
-          if (handleCheckTokenRef.current !== token) return;
-          setHandleCheck({ checking: false, available: null, message: null });
-        });
-    }, 250);
-
-    return () => window.clearTimeout(timer);
-  }, [checkUsernameAvailability, editingHandle, handleDraft, ownFriendProfile?.username]);
 
   const friendsByUid = useMemo(() => {
     const map = new Map<string, FriendConnection>();
@@ -477,39 +405,6 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     trimmedPeopleQuery,
     user,
   ]);
-
-  const handleOpenEditHandle = () => {
-    setHandleDraft(ownFriendProfile?.username ?? '');
-    setHandleStatus(null);
-    setActionError(null);
-    setEditingHandle((prev) => !prev);
-  };
-
-  const handleSaveHandle = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (handleSaving) return;
-    const validation = validateUsername(handleDraft);
-    if (!validation.ok) {
-      setHandleCheck({ checking: false, available: false, message: validation.error });
-      return;
-    }
-    setHandleSaving(true);
-    setActionError(null);
-    try {
-      await updateUsername(validation.username);
-      setEditingHandle(false);
-      setHandleStatus(`Username saved as @${validation.username}`);
-      window.setTimeout(() => setHandleStatus(null), 3000);
-    } catch (err) {
-      setHandleCheck({
-        checking: false,
-        available: false,
-        message: err instanceof Error ? err.message : 'Could not save username.',
-      });
-    } finally {
-      setHandleSaving(false);
-    }
-  };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -753,141 +648,21 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
             </p>
           </div>
 
-          {firebaseAvailable && user && (
+          {firebaseAvailable && user && (ownHandle || !ownFriendProfile) && (
             <div className="flex flex-wrap items-center gap-2">
-              {ownFriendProfile ? (
-                <button
-                  type="button"
-                  aria-expanded={editingHandle}
-                  onClick={handleOpenEditHandle}
-                  className={`inline-flex min-h-10 items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    editingHandle
-                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                      : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:border-[var(--border-strong)]'
-                  }`}
-                >
+              {ownHandle ? (
+                <span className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)]">
                   <AtSign className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
-                  <span>{ownHandle ?? 'Choose username'}</span>
-                  <Edit3 className="h-3 w-3 text-[var(--text-secondary)]" aria-hidden="true" />
-                </button>
+                  <span>{ownHandle}</span>
+                </span>
               ) : (
-                <span className="inline-flex min-h-10 items-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 text-xs text-[var(--text-secondary)]">
+                <span className="inline-flex min-h-9 items-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 text-xs text-[var(--text-secondary)]">
                   Preparing your @username…
                 </span>
               )}
-
-              <button
-                type="button"
-                aria-expanded={privacyOpen}
-                onClick={() => setPrivacyOpen((prev) => !prev)}
-                className={`inline-flex min-h-10 items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${
-                  privacyOpen
-                    ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                    : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:border-[var(--border-strong)]'
-                }`}
-              >
-                <Shield className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Privacy</span>
-              </button>
             </div>
           )}
         </div>
-
-        {/* Inline Username Editor */}
-        <AnimatePresence initial={false}>
-          {firebaseAvailable && user && editingHandle && (
-            <motion.form
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.2, ease: FOLIO_EASE }}
-              onSubmit={(e) => void handleSaveHandle(e)}
-              className="mt-4 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4"
-            >
-              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-                <div className="flex-1 space-y-1.5">
-                  <label
-                    htmlFor="username-handle-input"
-                    className="block text-xs font-medium text-[var(--text-primary)]"
-                  >
-                    Your @username
-                  </label>
-                  <p className="text-xs text-[var(--text-secondary)]">
-                    Choose a handle (3–24 letters, numbers, periods, or underscores) so friends can
-                    find you easily.
-                  </p>
-                  <div className="relative mt-1.5 flex items-center">
-                    <span
-                      aria-hidden="true"
-                      className="pointer-events-none absolute left-3 text-sm text-[var(--text-secondary)]"
-                    >
-                      @
-                    </span>
-                    <input
-                      id="username-handle-input"
-                      type="text"
-                      value={handleDraft}
-                      onChange={(e) => setHandleDraft(normalizeUsernameInput(e.target.value))}
-                      maxLength={24}
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      placeholder="hannah.miller"
-                      className="folio-input min-h-10 w-full py-1.5 pl-7 pr-3 text-base sm:max-w-sm sm:text-sm"
-                    />
-                  </div>
-                  {handleCheck.message && (
-                    <p
-                      role="status"
-                      className={`text-xs font-medium ${
-                        handleCheck.available === true
-                          ? 'text-[var(--color-sage)]'
-                          : handleCheck.available === false
-                            ? 'text-[var(--color-crimson)]'
-                            : 'text-[var(--text-secondary)]'
-                      }`}
-                    >
-                      {handleCheck.message}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex shrink-0 items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={handleSaving}
-                    onClick={() => setEditingHandle(false)}
-                    className="min-h-9 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={
-                      handleSaving ||
-                      handleCheck.checking ||
-                      handleCheck.available === false ||
-                      !normalizeUsernameInput(handleDraft)
-                    }
-                    className="btn-primary min-h-9 rounded-md px-3.5 py-1.5 text-xs font-medium disabled:opacity-55"
-                  >
-                    {handleSaving ? 'Saving…' : 'Save username'}
-                  </button>
-                </div>
-              </div>
-            </motion.form>
-          )}
-        </AnimatePresence>
-
-        {handleStatus && (
-          <p
-            role="status"
-            className="mt-2.5 inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-sage)]"
-          >
-            <Check className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>{handleStatus}</span>
-          </p>
-        )}
       </section>
 
       {!firebaseAvailable ? (
@@ -932,7 +707,6 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
         </section>
       ) : (
         <>
-          {privacyOpen && <FriendPrivacyPanel />}
 
           {(friendsFromCache || syncStatus === 'offline') && (
             <div className="flex items-center gap-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--color-lamp-soft)] px-4 py-2.5 text-xs text-[var(--text-primary)]">
@@ -1051,7 +825,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                 <div className="mt-4 space-y-2.5">
                   {!ownPrivacy.discoverable && (
                     <p className="text-xs text-[var(--text-secondary)]">
-                      Your profile is currently hidden from people search in Privacy settings.
+                      Your profile is currently hidden from people search in Settings.
                     </p>
                   )}
 
