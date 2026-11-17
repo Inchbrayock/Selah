@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
-  AtSign,
   Check,
   CloudOff,
   Search,
@@ -100,7 +99,6 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
   const searchTokenRef = useRef(0);
 
   const ownPrivacy = sanitizeFriendPrivacy(preferences.friendPrivacy);
-  const ownHandle = formatUsernameHandle(ownFriendProfile?.username);
 
   useEffect(() => {
     if (user && !ownFriendProfile) {
@@ -637,31 +635,14 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
           <span>Back to {backLabel}</span>
         </button>
 
-        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-          <div className="max-w-[60ch]">
-            <h1 className="font-display text-2xl font-medium tracking-tight text-[var(--text-primary)] sm:text-[2.15rem]">
-              Reading Circle
-            </h1>
-            <p className="mt-1 text-sm leading-relaxed text-[var(--text-secondary)]">
-              Find friends by name or @username to follow each other’s reading rhythm. Study notes
-              and reflections stay private on your own ledger.
-            </p>
-          </div>
-
-          {firebaseAvailable && user && (ownHandle || !ownFriendProfile) && (
-            <div className="flex flex-wrap items-center gap-2">
-              {ownHandle ? (
-                <span className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)]">
-                  <AtSign className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
-                  <span>{ownHandle}</span>
-                </span>
-              ) : (
-                <span className="inline-flex min-h-9 items-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 text-xs text-[var(--text-secondary)]">
-                  Preparing your @username…
-                </span>
-              )}
-            </div>
-          )}
+        <div className="max-w-[60ch]">
+          <h1 className="font-display text-2xl font-medium tracking-tight text-[var(--text-primary)] sm:text-[2.15rem]">
+            Reading Circle
+          </h1>
+          <p className="mt-1 text-sm leading-relaxed text-[var(--text-secondary)]">
+            Find friends by name or @username to follow each other’s reading rhythm. Study notes
+            and reflections stay private on your own ledger.
+          </p>
         </div>
       </section>
 

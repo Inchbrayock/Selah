@@ -41,11 +41,7 @@ const GRANULAR_TOGGLES: {
   },
 ];
 
-export interface FriendPrivacyPanelProps {
-  embedded?: boolean;
-}
-
-export const FriendPrivacyPanel: React.FC<FriendPrivacyPanelProps> = ({ embedded = false }) => {
+export const FriendPrivacyPanel: React.FC = () => {
   const { preferences, updatePreferences } = useBibleStore();
   const privacy = sanitizeFriendPrivacy(preferences.friendPrivacy);
 
@@ -58,25 +54,19 @@ export const FriendPrivacyPanel: React.FC<FriendPrivacyPanelProps> = ({ embedded
     });
   };
 
-  const content = (
-    <div className="space-y-4">
+  return (
+    <section
+      aria-labelledby="friend-privacy-heading"
+      className="folio-sheet space-y-4 p-5 sm:p-6"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border-subtle)] pb-4">
         <div className="max-w-[60ch]">
-          {embedded ? (
-            <h3
-              id="friend-privacy-heading"
-              className="text-sm font-medium text-[var(--text-primary)]"
-            >
-              Search &amp; reading privacy
-            </h3>
-          ) : (
-            <h2
-              id="friend-privacy-heading"
-              className="font-display text-xl font-medium text-[var(--text-primary)]"
-            >
-              Circle privacy
-            </h2>
-          )}
+          <h2
+            id="friend-privacy-heading"
+            className="font-display text-xl font-medium text-[var(--text-primary)]"
+          >
+            Circle privacy
+          </h2>
           <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
             Choose whether readers can find you in search and what accepted friends can view.
             Personal study notes, reflection entries, and your email address are never shared.
@@ -158,19 +148,6 @@ export const FriendPrivacyPanel: React.FC<FriendPrivacyPanelProps> = ({ embedded
           </label>
         ))}
       </div>
-    </div>
-  );
-
-  if (embedded) {
-    return content;
-  }
-
-  return (
-    <section
-      aria-labelledby="friend-privacy-heading"
-      className="folio-sheet p-4 sm:p-6"
-    >
-      {content}
     </section>
   );
 };

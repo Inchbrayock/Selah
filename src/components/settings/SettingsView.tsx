@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowLeft,
+  AtSign,
   BookOpen,
   Camera,
   Check,
@@ -25,7 +26,7 @@ import {
   normalizeUsernameInput,
   validateUsername,
 } from '../../lib/friends';
-import { SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
+import { FOLIO_EASE, SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
 import { getSystemPrefersDark } from '../../lib/theme';
 import { useAppUpdater } from '../../lib/useAppUpdater';
 import { useBibleStore } from '../../store/useBibleStore';
@@ -47,7 +48,7 @@ const SECTION_LINKS: {
   icon: React.ComponentType<{ className?: string }>;
 }[] = [
   { id: 'settings-account', label: 'Cloud account', icon: Cloud },
-  { id: 'settings-privacy', label: 'Username & privacy', icon: Shield },
+  { id: 'settings-privacy', label: 'Circle privacy', icon: Shield },
   { id: 'settings-appearance', label: 'Appearance', icon: Palette },
   { id: 'settings-cadence', label: 'Reading cadence', icon: SlidersHorizontal },
   { id: 'settings-data', label: 'Data & portability', icon: Database },
@@ -100,6 +101,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
 
+  const [editingHandle, setEditingHandle] = useState(false);
   const [handleDraft, setHandleDraft] = useState(() => ownFriendProfile?.username ?? '');
   const [handleDirty, setHandleDirty] = useState(false);
   const [handleCheck, setHandleCheck] = useState<{
@@ -123,6 +125,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   }, [ensureFriendProfileReady, firebaseAvailable, ownFriendProfile, user]);
 
   useEffect(() => {
+    setEditingHandle(false);
     setHandleDirty(false);
     setHandleDraft(ownFriendProfile?.username ?? '');
     setHandleCheck({ checking: false, available: null, message: null });
@@ -144,7 +147,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!firebaseAvailable || !user || !handleDirty) return;
+    if (!firebaseAvailable || !user || !editingHandle || !handleDirty) return;
     const normalized = normalizeUsernameInput(handleDraft);
     const current = ownFriendProfile?.username ?? '';
     const token = ++handleCheckTokenRef.current;
@@ -195,12 +198,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     return () => window.clearTimeout(timer);
   }, [
     checkUsernameAvailability,
+    editingHandle,
     firebaseAvailable,
     handleDirty,
     handleDraft,
     ownFriendProfile?.username,
     user,
   ]);
+
+  const handleOpenEditHandle = () => {
+    setHandleDraft(ownFriendProfile?.username ?? '');
+    setHandleDirty(false);
+    setHandleCheck({ checking: false, available: null, message: null });
+    setHandleStatus(null);
+    setEditingHandle((prev) => !prev);
+  };
 
   const handleSaveHandle = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -214,6 +226,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setHandleStatus(null);
     try {
       await updateUsername(validation.username);
+      setEditingHandle(false);
       setHandleDirty(false);
       setHandleDraft(validation.username);
       setHandleCheck({ checking: false, available: null, message: null });
@@ -325,7 +338,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               Sanctuary Settings
             </h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              Username, privacy, appearance, cloud sync, reading cadence, data backup, and updates.
+              Cloud account, circle privacy, appearance, reading cadence, data backup, and updates.
             </p>
           </div>
           <span className="font-mono text-xs text-[var(--text-secondary)]">
@@ -402,6 +415,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <span>Change profile picture</span>
                 </button>
               )}
+              {firebaseAvailable && user && (
+                <button
+                  type="button"
+                  aria-expanded={editingHandle}
+                  onClick={handleOpenEditHandle}
+                  className={`inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border px-3.5 py-2 text-xs font-medium transition-colors sm:min-h-9 ${
+                    editingHandle
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                      : 'border-[var(--border-strong)] bg-[var(--bg-canvas)] text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
+                  }`}
+                >
+                  <AtSign className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
+                  <span>{ownFriendProfile ? 'Change username' : 'Preparing username…'}</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onOpenAccount}
@@ -420,38 +448,148 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </button>
               )}
             </div>
+
+            <AnimatePresence initial={false}>
+              {firebaseAvailable && user && editingHandle && (
+                <motion.form
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2, ease: FOLIO_EASE }}
+                  onSubmit={(e) => void handleSaveHandle(e)}
+                  className="mt-3 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3.5"
+                >
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="username-handle-input"
+                      className="block text-xs font-medium text-[var(--text-primary)]"
+                    >
+                      Your @username
+                    </label>
+                    <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
+                      3–24 letters, numbers, periods, or underscores.
+                    </p>
+                    <div className="relative flex items-center">
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute left-3 text-sm text-[var(--text-secondary)]"
+                      >
+                        @
+                      </span>
+                      <input
+                        id="username-handle-input"
+                        type="text"
+                        value={handleDraft}
+                        onChange={(e) => {
+                          setHandleDirty(true);
+                          setHandleStatus(null);
+                          setHandleDraft(normalizeUsernameInput(e.target.value));
+                        }}
+                        maxLength={24}
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        placeholder="hannah.miller"
+                        className="folio-input min-h-10 w-full py-1.5 pl-7 pr-3 text-base sm:text-sm"
+                      />
+                    </div>
+                    {handleCheck.message && (
+                      <p
+                        role="status"
+                        className={`text-xs font-medium ${
+                          handleCheck.available === true
+                            ? 'text-[var(--color-sage)]'
+                            : handleCheck.available === false
+                              ? 'text-[var(--color-crimson)]'
+                              : 'text-[var(--text-secondary)]'
+                        }`}
+                      >
+                        {handleCheck.message}
+                      </p>
+                    )}
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        disabled={handleSaving}
+                        onClick={() => setEditingHandle(false)}
+                        className="min-h-9 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={
+                          handleSaving ||
+                          handleCheck.checking ||
+                          handleCheck.available === false ||
+                          !normalizedDraft ||
+                          handleUnchanged
+                        }
+                        className="btn-primary min-h-9 rounded-md px-3.5 py-1.5 text-xs font-medium disabled:opacity-55"
+                      >
+                        {handleSaving ? 'Saving…' : 'Save username'}
+                      </button>
+                    </div>
+                  </div>
+                </motion.form>
+              )}
+            </AnimatePresence>
+
+            {handleStatus && (
+              <p
+                role="status"
+                className="mt-3 flex items-center gap-1.5 text-xs font-medium text-[var(--color-sage)]"
+              >
+                <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>{handleStatus}</span>
+              </p>
+            )}
+
+            {friendsError && user && (
+              <p
+                role="alert"
+                className="mt-3 rounded-md border border-[var(--color-crimson)] bg-[var(--bg-canvas)] px-3 py-2 text-xs font-medium text-[var(--color-crimson)]"
+              >
+                {friendsError}
+              </p>
+            )}
           </section>
         </aside>
 
         {/* Main Settings Sections */}
         <div className="space-y-6 lg:col-span-8">
-          {/* Username & Circle Privacy */}
-          <section
-            id="settings-privacy"
-            className="folio-sheet scroll-mt-20 space-y-5 p-5 sm:p-6"
-            aria-labelledby="settings-privacy-heading"
-          >
-            <div>
+          {/* Circle Privacy */}
+          {!firebaseAvailable ? (
+            <section
+              id="settings-privacy"
+              className="folio-sheet scroll-mt-20 space-y-2 p-5 sm:p-6"
+              aria-labelledby="settings-privacy-heading"
+            >
               <h2
                 id="settings-privacy-heading"
                 className="font-display text-xl font-medium text-[var(--text-primary)]"
               >
-                Username &amp; privacy
+                Circle privacy
               </h2>
-              <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
-                Choose your @username handle, whether readers can find you in search, and what
-                accepted friends see.
+              <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
+                Reading Circle privacy settings require Firebase cloud sync to be configured.
               </p>
-            </div>
-
-            {!firebaseAvailable ? (
-              <p className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-4 py-3 text-xs leading-relaxed text-[var(--text-secondary)]">
-                Usernames and circle privacy require Firebase cloud sync to be configured.
-              </p>
-            ) : !user ? (
+            </section>
+          ) : !user ? (
+            <section
+              id="settings-privacy"
+              className="folio-sheet scroll-mt-20 space-y-3 p-5 sm:p-6"
+              aria-labelledby="settings-privacy-heading"
+            >
+              <h2
+                id="settings-privacy-heading"
+                className="font-display text-xl font-medium text-[var(--text-primary)]"
+              >
+                Circle privacy
+              </h2>
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-4">
                 <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
-                  Sign in to claim a @username handle and manage Reading Circle privacy settings.
+                  Sign in to choose whether readers can find you and what accepted friends can see.
                 </p>
                 <button
                   type="button"
@@ -461,113 +599,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   Sign in
                 </button>
               </div>
-            ) : (
-              <>
-                {friendsError && (
-                  <p
-                    role="alert"
-                    className="rounded-md border border-[var(--color-crimson)] bg-[var(--bg-canvas)] px-3.5 py-2.5 text-xs font-medium text-[var(--color-crimson)]"
-                  >
-                    {friendsError}
-                  </p>
-                )}
-
-                <form
-                  onSubmit={(e) => void handleSaveHandle(e)}
-                  className="space-y-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-4"
-                >
-                  <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-                    <div className="flex-1 space-y-1.5">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <label
-                          htmlFor="username-handle-input"
-                          className="block text-sm font-medium text-[var(--text-primary)]"
-                        >
-                          Your @username
-                        </label>
-                        {!ownFriendProfile && (
-                          <span className="text-xs text-[var(--text-secondary)]">
-                            Preparing your @username…
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
-                        Choose a handle (3–24 letters, numbers, periods, or underscores) so friends
-                        can find you easily.
-                      </p>
-                      <div className="relative mt-1.5 flex items-center">
-                        <span
-                          aria-hidden="true"
-                          className="pointer-events-none absolute left-3 text-sm text-[var(--text-secondary)]"
-                        >
-                          @
-                        </span>
-                        <input
-                          id="username-handle-input"
-                          type="text"
-                          value={handleDraft}
-                          onChange={(e) => {
-                            setHandleDirty(true);
-                            setHandleStatus(null);
-                            setHandleDraft(normalizeUsernameInput(e.target.value));
-                          }}
-                          maxLength={24}
-                          autoCapitalize="none"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          placeholder="hannah.miller"
-                          className="folio-input min-h-10 w-full py-1.5 pl-7 pr-3 text-base sm:max-w-sm sm:text-sm"
-                        />
-                      </div>
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={
-                        handleSaving ||
-                        handleCheck.checking ||
-                        handleCheck.available === false ||
-                        !normalizedDraft ||
-                        handleUnchanged
-                      }
-                      className="btn-primary min-h-10 shrink-0 rounded-md px-3.5 py-2 text-xs font-medium disabled:opacity-55 sm:min-h-9"
-                    >
-                      {handleSaving ? 'Saving…' : 'Save username'}
-                    </button>
-                  </div>
-
-                  {handleCheck.message && (
-                    <p
-                      role="status"
-                      className={`text-xs font-medium ${
-                        handleCheck.available === true
-                          ? 'text-[var(--color-sage)]'
-                          : handleCheck.available === false
-                            ? 'text-[var(--color-crimson)]'
-                            : 'text-[var(--text-secondary)]'
-                      }`}
-                    >
-                      {handleCheck.message}
-                    </p>
-                  )}
-
-                  {handleStatus && (
-                    <p
-                      role="status"
-                      className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-sage)]"
-                    >
-                      <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                      <span>{handleStatus}</span>
-                    </p>
-                  )}
-                </form>
-
-                <div className="border-t border-[var(--border-subtle)] pt-5">
-                  <FriendPrivacyPanel embedded />
-                </div>
-              </>
-            )}
-          </section>
+            </section>
+          ) : (
+            <div id="settings-privacy" className="scroll-mt-20">
+              <FriendPrivacyPanel />
+            </div>
+          )}
 
           {/* Theme Swatches */}
           <section

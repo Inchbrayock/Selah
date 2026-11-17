@@ -287,8 +287,8 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Open Reading Circle' }));
 
-    // Own @handle badge shows read-only without username editor or privacy controls on Friends page
-    expect(await screen.findByText('@hannah')).toBeInTheDocument();
+    // Own @handle is hidden on the Friends page alongside username editing and privacy controls
+    expect(screen.queryByText('@hannah')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /@hannah/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Privacy/i })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Your @username')).not.toBeInTheDocument();
@@ -365,14 +365,20 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
       expect(friendsMocks.deleteFriendship).toHaveBeenCalledWith('uid_hannah_uid_ruth');
     });
 
-    // Navigate to Settings -> edit own @username with live availability check
+    // Navigate to Settings -> Change username directly inside the Cloud account card (not in Privacy)
     fireEvent.click(screen.getByRole('button', { name: /Open account and cloud sync/i }));
     fireEvent.click(await screen.findByRole('button', { name: /Settings/i }, { timeout: 3000 }));
-    expect(
-      await screen.findByRole('heading', { name: /Username & privacy/i })
-    ).toBeInTheDocument();
+    const accountCard = (
+      await screen.findByRole('heading', { level: 2, name: /Hannah/i })
+    ).closest('section')!;
+    const privacyCard = (
+      await screen.findByRole('heading', { level: 2, name: /Circle privacy/i })
+    ).closest('section')!;
+    expect(within(accountCard).getByText('@hannah')).toBeInTheDocument();
+    expect(within(privacyCard).queryByLabelText('Your @username')).not.toBeInTheDocument();
 
-    const handleInput = await screen.findByLabelText('Your @username');
+    fireEvent.click(within(accountCard).getByRole('button', { name: /Change username/i }));
+    const handleInput = await within(accountCard).findByLabelText('Your @username');
     expect(handleInput).toHaveValue('hannah');
     fireEvent.change(handleInput, { target: { value: 'hannah.reads' } });
 
@@ -384,7 +390,7 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
     });
     expect(await screen.findByText('@hannah.reads is available')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save username' }));
+    fireEvent.click(within(accountCard).getByRole('button', { name: 'Save username' }));
     await waitFor(() => {
       expect(friendsMocks.claimCustomUsername).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -393,8 +399,8 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
         })
       );
     });
-    expect(await screen.findByText('Username saved as @hannah.reads')).toBeInTheDocument();
-    expect(screen.getByText('@hannah.reads')).toBeInTheDocument();
+    expect(await within(accountCard).findByText('Username saved as @hannah.reads')).toBeInTheDocument();
+    expect(within(accountCard).getByText('@hannah.reads')).toBeInTheDocument();
   });
 
   it('handles incoming/outgoing requests, inspects Friend Folio & MiniCanonicalSpine, and toggles search privacy in Settings', async () => {
