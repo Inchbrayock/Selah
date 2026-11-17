@@ -1,7 +1,7 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Award, BookOpen, Compass, ScrollText, User, Users } from 'lucide-react';
-import { SPRING_DOCK, SPRING_SEAL, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
+import { SPRING_DOCK, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
 import { type CloudSyncStatus, useBibleStore } from '../../store/useBibleStore';
 import { ProfileAvatar } from './ProfileAvatar';
 import { SanctuaryLamp } from './SanctuaryLamp';
@@ -44,8 +44,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   accountOpen = false,
   accountButtonRef,
 }) => {
-  const { summary, achievements, user, authLoading, syncStatus, incomingRequests } = useBibleStore();
-  const unlockedCount = achievements.filter((a) => a.unlocked).length;
+  const { summary, user, authLoading, syncStatus, incomingRequests } = useBibleStore();
   const hasStreak = summary.currentStreak > 0;
   const activeIndex = NAV_ITEMS.findIndex((item) => item.id === activeTab);
 
@@ -72,7 +71,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
     measureDesktopUnderline();
     window.addEventListener('resize', measureDesktopUnderline);
     return () => window.removeEventListener('resize', measureDesktopUnderline);
-  }, [measureDesktopUnderline, unlockedCount]);
+  }, [measureDesktopUnderline]);
 
   const accountTitle = user
     ? `${user.displayName || user.email || 'Sanctuary account'} (${SYNC_LABELS[syncStatus]})`
@@ -176,18 +175,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                     {item.shortLabel}
                   </span>
                   <span className="sr-only sm:not-sr-only lg:inline lg:whitespace-nowrap">{item.label}</span>
-                  {item.id === 'achievements' && unlockedCount > 0 ? (
-                    <motion.span
-                      key={unlockedCount}
-                      data-testid="nav-seals-count"
-                      initial={{ scale: 0.72 }}
-                      animate={{ scale: 1 }}
-                      transition={SPRING_SEAL}
-                      className="hidden lg:inline-block lg:rounded lg:bg-[var(--color-accent-soft)] lg:px-1.5 lg:py-0.5 lg:text-[0.7rem] lg:font-semibold lg:leading-none lg:text-[var(--color-accent)] lg:tabular-nums"
-                    >
-                      {unlockedCount}
-                    </motion.span>
-                  ) : null}
                 </motion.button>
               );
             })}
