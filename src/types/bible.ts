@@ -195,6 +195,7 @@ export type ColorSchemePreference = 'system' | 'light' | 'dark';
 
 export interface FriendPrivacySettings {
   sharingEnabled: boolean;
+  discoverable: boolean;
   showPhoto: boolean;
   showStreak: boolean;
   showRecentBook: boolean;
@@ -222,11 +223,29 @@ export interface FriendProfile {
   uid: string;
   displayName: string;
   photoURL: string | null;
-  friendCode: string;
+  username: string | null;
+  discoverable: boolean;
+  /** Legacy field preserved optionally for reading older cloud profiles. */
+  friendCode?: string;
   sharingEnabled: boolean;
   privacy: FriendPrivacySettings;
   stats: FriendStatsSnapshot;
   updatedAt?: string;
+}
+
+export interface ReaderDirectoryEntry {
+  uid: string;
+  displayName: string;
+  username: string | null;
+  photoURL: string | null;
+  updatedAt?: string;
+}
+
+export interface FriendRequestTarget {
+  uid: string;
+  displayName: string;
+  username?: string | null;
+  photoURL?: string | null;
 }
 
 export type FriendshipStatus = 'pending' | 'accepted';
@@ -237,8 +256,10 @@ export interface FriendshipRecord {
   requesterUid: string;
   recipientUid: string;
   requesterName: string;
+  requesterUsername?: string | null;
   requesterPhotoURL: string | null;
   recipientName: string;
+  recipientUsername?: string | null;
   recipientPhotoURL: string | null;
   status: FriendshipStatus;
   createdAt: string;
@@ -246,16 +267,11 @@ export interface FriendshipRecord {
   updatedAt: string;
 }
 
-export interface FriendCodeLookup {
-  code: string;
-  uid: string;
-  displayName: string;
-}
-
 export interface FriendConnection {
   friendship: FriendshipRecord;
   friendUid: string;
   displayName: string;
+  username: string | null;
   photoURL: string | null;
   profile: FriendProfile | null;
 }

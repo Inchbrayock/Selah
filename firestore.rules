@@ -24,8 +24,9 @@ rules_version = '2';
 //          - activePlanId: string | null (required key, null or 1..64 chars)
 //          - seenAchievementIds: list (required, 0..100 items, each string 1..64 chars)
 //          - shelfPlanIds: list (optional, 0..100 items, each string matching ^[a-z0-9-]{1,64}$)
-//          - friendPrivacy: map (optional, exact 7 bool keys: sharingEnabled, showPhoto,
-//              showStreak, showRecentBook, showBookProgress, showSealsCount, showActivePlan)
+//          - friendPrivacy: map (optional, 7 required bool keys: sharingEnabled, showPhoto,
+//              showStreak, showRecentBook, showBookProgress, showSealsCount, showActivePlan;
+//              plus optional bool key: discoverable)
 //          - fellowshipStats: map (optional, exact 3 int keys 0..100000: friendsPeak,
 //              cohortsPeak, encouragementsSent)
 //      - colorScheme: string (required, one of: 'system', 'light', 'dark')
@@ -86,7 +87,7 @@ rules_version = '2';
 //      - displayName: string (required, 0..100 chars)
 //      - createdAt: timestamp (required, must equal request.time on create)
 //
-// 5. Collection: friendCodes
+// 5. Collection: friendCodes (Legacy — preserved for cleanup/reading of older docs)
 //    Document ID: {code} (8-char Crockford-style code, ^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$)
 //    Access: Authenticated single-document `get` only (`allow list: if false` prevents enumeration).
 //            Owner (`uid == request.auth.uid`) may create, update, and delete.
@@ -97,7 +98,32 @@ rules_version = '2';
 //      - displayName: string (required, 0..100 chars)
 //      - updatedAt: timestamp (required, must equal request.time on create and update)
 //
-// 6. Collection: friendProfiles
+// 6. Collection: usernames
+//    Document ID: {username} (3..24 chars, ^[a-z0-9][a-z0-9._]{1,22}[a-z0-9]$, no '..')
+//    Access: Authenticated single-document `get` only (`allow list: if false` prevents enumeration).
+//            Owner (`uid == request.auth.uid`) may create, update, and delete (release handle).
+//            Contains no email PII, photoURL, displayName, or reading stats.
+//    Fields:
+//      - username: string (required, immutable, == {username}, isValidUsernameString)
+//      - uid: string (required, immutable, == request.auth.uid on create, 1..128 chars, ^[a-zA-Z0-9:-]{1,128}$)
+//      - updatedAt: timestamp (required, must equal request.time on create and update)
+//
+// 7. Collection: readerDirectory
+//    Document ID: {userId} (1..128 chars, ^[a-zA-Z0-9:-]{1,128}$)
+//    Access: Authenticated single-document `get`, and bounded `list` queries only
+//            (`request.query.limit != null && request.query.limit <= 25`).
+//            Owner (`request.auth.uid == userId`) may create, update, and delete (opt-out).
+//            Lightweight discovery card: contains NO email PII and NO reading stats.
+//    Fields:
+//      - uid: string (required, immutable, == {userId}, 1..128 chars, ^[a-zA-Z0-9:-]{1,128}$)
+//      - displayName: string (required, 0..100 chars)
+//      - displayNameLower: string (required, 0..100 chars)
+//      - username: string | null (required key, null or isValidUsernameString)
+//      - photoURL: string | null (required key, null or https:// URL 1..1000 chars)
+//      - searchPrefixes: list (required, 0..60 non-empty strings, each 1..32 chars)
+//      - updatedAt: timestamp (required, must equal request.time on create and update)
+//
+// 8. Collection: friendProfiles
 //    Document ID: {userId} (1..128 chars, ^[a-zA-Z0-9:-]{1,128}$)
 //    Access: Single-document `get` by owner or accepted friend (`friendships/{pairId}.status == 'accepted'`).
 //            `allow list: if false` prevents scraping. `allow delete: if false`.
@@ -106,10 +132,12 @@ rules_version = '2';
 //      - uid: string (required, immutable, == {userId}, 1..128 chars, ^[a-zA-Z0-9:-]{1,128}$)
 //      - displayName: string (required, 0..100 chars)
 //      - photoURL: string | null (required key, null or https:// URL 1..1000 chars)
-//      - friendCode: string (required, ^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$)
+//      - username: string | null (optional, null or isValidUsernameString)
+//      - discoverable: bool (optional)
+//      - friendCode: string (optional legacy, ^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$)
 //      - sharingEnabled: bool (required)
-//      - privacy: map (required, exact 7 bool keys: sharingEnabled, showPhoto, showStreak,
-//          showRecentBook, showBookProgress, showSealsCount, showActivePlan)
+//      - privacy: map (required, 7 required bool keys: sharingEnabled, showPhoto, showStreak,
+//          showRecentBook, showBookProgress, showSealsCount, showActivePlan; optional bool: discoverable)
 //      - stats: map (required, exact 12 keys):
 //          - totalChaptersRead: int (required, 0..1189)
 //          - otChaptersRead: int (required, 0..929)
@@ -125,27 +153,30 @@ rules_version = '2';
 //          - bookProgressSpec: string (required, 0..1000 chars, '' or bookId:count pairs)
 //      - updatedAt: timestamp (required, must equal request.time on create and update)
 //
-// 7. Collection: friendships
+// 9. Collection: friendships
 //    Document ID: {pairId} (canonical sorted `uidA + '_' + uidB` where `uidA < uidB`)
 //    Access: Participants (`request.auth.uid in users`) may `get`, `list` (when filtered
 //            with `where('users', 'array-contains', uid)`), and `delete` (cancel/decline/unfriend).
-//            Requester creates in `'pending'` state when recipient has a `friendProfiles` doc and
-//            neither user has blocked the other. Only recipient may update `'pending'` -> `'accepted'`.
+//            Requester creates in `'pending'` state when recipient has a `friendProfiles` or
+//            `readerDirectory` doc and neither user has blocked the other. Only recipient may
+//            update `'pending'` -> `'accepted'`.
 //    Fields:
 //      - id: string (required, immutable, == {pairId})
 //      - users: list of 2 strings (required, immutable, sorted `users[0] < users[1]`, each ^[a-zA-Z0-9:-]{1,128}$)
 //      - requesterUid: string (required, immutable, in `users`)
 //      - recipientUid: string (required, immutable, in `users`, != `requesterUid`)
 //      - requesterName: string (required, immutable, 0..100 chars)
+//      - requesterUsername: string | null (optional, immutable, null or isValidUsernameString)
 //      - requesterPhotoURL: string | null (required key, immutable, null or https:// URL 1..1000 chars)
 //      - recipientName: string (required, 0..100 chars)
+//      - recipientUsername: string | null (optional, null or isValidUsernameString)
 //      - recipientPhotoURL: string | null (required key, null or https:// URL 1..1000 chars)
 //      - status: string (required, 'pending' or 'accepted')
 //      - createdAt: timestamp (required, immutable, must equal request.time on create)
 //      - acceptedAt: timestamp | null (required key, null while pending, == request.time on accept)
 //      - updatedAt: timestamp (required, must equal request.time on create and update)
 //
-// 8. Collection: sharedPlans
+// 10. Collection: sharedPlans
 //    Document ID: {cohortId} (4..40 chars, ^[a-z0-9-]{4,40}$)
 //    Access: Participants (`request.auth.uid in participantUids`) may `get` and `list`
 //            (when queried with `where('participantUids', 'array-contains', uid)`).
@@ -168,7 +199,7 @@ rules_version = '2';
 //      - createdAt: timestamp (required, immutable, must equal request.time on create)
 //      - updatedAt: timestamp (required, must equal request.time on create and update)
 //
-// 9. Subcollection: sharedPlans/{cohortId}/members
+// 11. Subcollection: sharedPlans/{cohortId}/members
 //    Document ID: {memberUid} (1..128 chars, ^[a-zA-Z0-9:-]{1,128}$)
 //    Access: Cohort participants may `read` (`get` and `list`). Host may invite accepted
 //            unblocked friends in `'invited'` status with zeroed progress; member may join
@@ -187,7 +218,7 @@ rules_version = '2';
 //      - joinedAt: timestamp | null (required key, null if invited, server timestamp when joining, immutable once set)
 //      - updatedAt: timestamp (required, must equal request.time on create and update)
 //
-// 10. Subcollection: friendProfiles/{recipientUid}/encouragements
+// 12. Subcollection: friendProfiles/{recipientUid}/encouragements
 //     Document ID: {senderUid} (1..128 chars, != {recipientUid})
 //     Access: Recipient may `get`, `list`, and acknowledge (`acknowledgedAt` only).
 //             Sender may `get` their own sent doc, create when accepted & unblocked friend
@@ -307,6 +338,15 @@ service cloud.firestore {
       return code is string &&
         code.size() == 8 &&
         code.matches("^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$");
+    }
+
+    // Validate unique @username handle (3..24 chars, [a-z0-9._], starts/ends [a-z0-9], no '..')
+    function isValidUsernameString(val) {
+      return val is string &&
+        val.size() >= 3 &&
+        val.size() <= 24 &&
+        val.matches("^[a-z0-9][a-z0-9._]{1,22}[a-z0-9]$") &&
+        !val.matches(".*\\.\\..*");
     }
 
     // Validate display name string (0..100 chars)
@@ -440,7 +480,7 @@ service cloud.firestore {
     }
 
     function isValidFriendPrivacy(privacy) {
-      let keys = [
+      let requiredKeys = [
         'sharingEnabled',
         'showPhoto',
         'showStreak',
@@ -449,9 +489,20 @@ service cloud.firestore {
         'showSealsCount',
         'showActivePlan'
       ];
-      return isValidMap(privacy, keys) &&
-        privacy.keys().hasAll(keys) &&
+      let allowedKeys = [
+        'sharingEnabled',
+        'discoverable',
+        'showPhoto',
+        'showStreak',
+        'showRecentBook',
+        'showBookProgress',
+        'showSealsCount',
+        'showActivePlan'
+      ];
+      return isValidMap(privacy, allowedKeys) &&
+        privacy.keys().hasAll(requiredKeys) &&
         privacy.sharingEnabled is bool &&
+        (!('discoverable' in privacy) || privacy.discoverable is bool) &&
         privacy.showPhoto is bool &&
         privacy.showStreak is bool &&
         privacy.showRecentBook is bool &&
@@ -664,6 +715,90 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidUsernameDoc(data, username) {
+      let keys = ['username', 'uid', 'updatedAt'];
+      return hasOnlyAllowedFields(keys) &&
+        hasRequiredFields(keys) &&
+        isValidUsernameString(username) &&
+        isValidUsernameString(data.username) &&
+        data.username == username &&
+        isValidUidString(data.uid) &&
+        data.updatedAt is timestamp;
+    }
+
+    // Deep array element validation for readerDirectory searchPrefixes (0..60 items, 1..32 chars each).
+    // Uses group-of-10 unrolling so international Unicode characters work while staying well under 1,000 expressions.
+    function isValidSearchPrefix(val) {
+      return val is string && val.matches("^[\\s\\S]{1,32}$");
+    }
+
+    function isValidPrefixGroup10Full(list, start) {
+      return isValidSearchPrefix(list[start]) &&
+        isValidSearchPrefix(list[start + 1]) &&
+        isValidSearchPrefix(list[start + 2]) &&
+        isValidSearchPrefix(list[start + 3]) &&
+        isValidSearchPrefix(list[start + 4]) &&
+        isValidSearchPrefix(list[start + 5]) &&
+        isValidSearchPrefix(list[start + 6]) &&
+        isValidSearchPrefix(list[start + 7]) &&
+        isValidSearchPrefix(list[start + 8]) &&
+        isValidSearchPrefix(list[start + 9]);
+    }
+
+    function isValidPrefixGroup10(list, start) {
+      let n = list.size();
+      return n <= start ||
+        (n >= start + 10 && isValidPrefixGroup10Full(list, start)) ||
+        (n < start + 10 &&
+          isValidSearchPrefix(list[start]) &&
+          (n <= start + 1 || isValidSearchPrefix(list[start + 1])) &&
+          (n <= start + 2 || isValidSearchPrefix(list[start + 2])) &&
+          (n <= start + 3 || isValidSearchPrefix(list[start + 3])) &&
+          (n <= start + 4 || isValidSearchPrefix(list[start + 4])) &&
+          (n <= start + 5 || isValidSearchPrefix(list[start + 5])) &&
+          (n <= start + 6 || isValidSearchPrefix(list[start + 6])) &&
+          (n <= start + 7 || isValidSearchPrefix(list[start + 7])) &&
+          (n <= start + 8 || isValidSearchPrefix(list[start + 8])));
+    }
+
+    function isValidSearchPrefixes(prefixes) {
+      return prefixes is list &&
+        prefixes.size() <= 60 &&
+        isValidPrefixGroup10(prefixes, 0) &&
+        (prefixes.size() <= 10 || (
+          isValidPrefixGroup10(prefixes, 10) &&
+          isValidPrefixGroup10(prefixes, 20)
+        )) &&
+        (prefixes.size() <= 30 || (
+          isValidPrefixGroup10(prefixes, 30) &&
+          isValidPrefixGroup10(prefixes, 40) &&
+          isValidPrefixGroup10(prefixes, 50)
+        ));
+    }
+
+    function isValidReaderDirectoryEntry(data, userId) {
+      let keys = [
+        'uid',
+        'displayName',
+        'displayNameLower',
+        'username',
+        'photoURL',
+        'searchPrefixes',
+        'updatedAt'
+      ];
+      return hasOnlyAllowedFields(keys) &&
+        hasRequiredFields(keys) &&
+        isValidUidString(userId) &&
+        isValidUidString(data.uid) &&
+        data.uid == userId &&
+        isValidDisplayName(data.displayName) &&
+        isValidDisplayName(data.displayNameLower) &&
+        (data.username == null || isValidUsernameString(data.username)) &&
+        isValidOptionalPhotoUrl(data.photoURL) &&
+        isValidSearchPrefixes(data.searchPrefixes) &&
+        data.updatedAt is timestamp;
+    }
+
     function isValidFriendStats(stats) {
       let keys = [
         'totalChaptersRead',
@@ -709,24 +844,37 @@ service cloud.firestore {
     }
 
     function isValidFriendProfile(data, userId) {
-      let keys = [
+      let requiredKeys = [
         'uid',
         'displayName',
         'photoURL',
+        'sharingEnabled',
+        'privacy',
+        'stats',
+        'updatedAt'
+      ];
+      let allowedKeys = [
+        'uid',
+        'displayName',
+        'photoURL',
+        'username',
+        'discoverable',
         'friendCode',
         'sharingEnabled',
         'privacy',
         'stats',
         'updatedAt'
       ];
-      return hasOnlyAllowedFields(keys) &&
-        hasRequiredFields(keys) &&
+      return hasOnlyAllowedFields(allowedKeys) &&
+        hasRequiredFields(requiredKeys) &&
         isValidUidString(userId) &&
         isValidUidString(data.uid) &&
         data.uid == userId &&
         isValidDisplayName(data.displayName) &&
         isValidOptionalPhotoUrl(data.photoURL) &&
-        isValidFriendCodeString(data.friendCode) &&
+        (!('username' in data) || data.username == null || isValidUsernameString(data.username)) &&
+        (!('discoverable' in data) || data.discoverable is bool) &&
+        (!('friendCode' in data) || isValidFriendCodeString(data.friendCode)) &&
         data.sharingEnabled is bool &&
         isValidFriendPrivacy(data.privacy) &&
         isValidFriendStats(data.stats) &&
@@ -734,7 +882,7 @@ service cloud.firestore {
     }
 
     function isValidFriendship(data, pairId) {
-      let keys = [
+      let requiredKeys = [
         'id',
         'users',
         'requesterUid',
@@ -748,8 +896,24 @@ service cloud.firestore {
         'acceptedAt',
         'updatedAt'
       ];
-      return hasOnlyAllowedFields(keys) &&
-        hasRequiredFields(keys) &&
+      let allowedKeys = [
+        'id',
+        'users',
+        'requesterUid',
+        'recipientUid',
+        'requesterName',
+        'requesterUsername',
+        'requesterPhotoURL',
+        'recipientName',
+        'recipientUsername',
+        'recipientPhotoURL',
+        'status',
+        'createdAt',
+        'acceptedAt',
+        'updatedAt'
+      ];
+      return hasOnlyAllowedFields(allowedKeys) &&
+        hasRequiredFields(requiredKeys) &&
         data.id is string &&
         data.id == pairId &&
         data.users is list &&
@@ -764,8 +928,14 @@ service cloud.firestore {
         data.recipientUid in data.users &&
         data.recipientUid != data.requesterUid &&
         isValidDisplayName(data.requesterName) &&
+        (!('requesterUsername' in data) ||
+          data.requesterUsername == null ||
+          isValidUsernameString(data.requesterUsername)) &&
         isValidOptionalPhotoUrl(data.requesterPhotoURL) &&
         isValidDisplayName(data.recipientName) &&
+        (!('recipientUsername' in data) ||
+          data.recipientUsername == null ||
+          isValidUsernameString(data.recipientUsername)) &&
         isValidOptionalPhotoUrl(data.recipientPhotoURL) &&
         data.status is string &&
         data.status in ['pending', 'accepted'] &&
@@ -1018,6 +1188,53 @@ service cloud.firestore {
         isDocOwner();
     }
 
+    match /usernames/{username} {
+      // Single-handle lookups only; list disabled to prevent handle enumeration.
+      allow get: if isAuthenticated();
+      allow list: if false;
+
+      allow create: if isAuthenticated() &&
+        uidUnchanged() &&
+        request.resource.data.uid == request.auth.uid &&
+        isValidUsernameDoc(request.resource.data, username) &&
+        isServerTimestamp(request.resource.data.updatedAt);
+
+      allow update: if isAuthenticated() &&
+        resource != null &&
+        isDocOwner() &&
+        uidNotModified() &&
+        areImmutableFieldsUnchanged(['username', 'uid']) &&
+        isValidUsernameDoc(request.resource.data, username) &&
+        isServerTimestamp(request.resource.data.updatedAt);
+
+      allow delete: if isAuthenticated() &&
+        resource != null &&
+        isDocOwner();
+    }
+
+    match /readerDirectory/{userId} {
+      // Lightweight search cards (no email PII, no reading stats); list bounded to limit <= 25.
+      allow get: if isAuthenticated();
+      allow list: if isAuthenticated() &&
+        request.query.limit != null &&
+        request.query.limit <= 25;
+
+      allow create: if isOwner(userId) &&
+        uidUnchanged() &&
+        isValidReaderDirectoryEntry(request.resource.data, userId) &&
+        isServerTimestamp(request.resource.data.updatedAt);
+
+      allow update: if isOwner(userId) &&
+        isDocOwner() &&
+        uidNotModified() &&
+        areImmutableFieldsUnchanged(['uid']) &&
+        isValidReaderDirectoryEntry(request.resource.data, userId) &&
+        isServerTimestamp(request.resource.data.updatedAt);
+
+      // Users can delete their directory card to opt out of discovery cleanly.
+      allow delete: if isOwner(userId);
+    }
+
     match /friendProfiles/{userId} {
       // Owner or accepted friends only; list disabled to prevent profile scraping.
       allow get: if isOwner(userId) || isAcceptedFriend(userId);
@@ -1094,7 +1311,8 @@ service cloud.firestore {
         request.resource.data.acceptedAt == null &&
         isServerTimestamp(request.resource.data.createdAt) &&
         isServerTimestamp(request.resource.data.updatedAt) &&
-        exists(/databases/$(database)/documents/friendProfiles/$(request.resource.data.recipientUid)) &&
+        (exists(/databases/$(database)/documents/friendProfiles/$(request.resource.data.recipientUid)) ||
+         exists(/databases/$(database)/documents/readerDirectory/$(request.resource.data.recipientUid))) &&
         !exists(/databases/$(database)/documents/users/$(request.resource.data.recipientUid)/blockedUsers/$(request.auth.uid)) &&
         !exists(/databases/$(database)/documents/users/$(request.auth.uid)/blockedUsers/$(request.resource.data.recipientUid));
 
@@ -1108,6 +1326,7 @@ service cloud.firestore {
           'requesterUid',
           'recipientUid',
           'requesterName',
+          'requesterUsername',
           'requesterPhotoURL',
           'createdAt'
         ]) &&

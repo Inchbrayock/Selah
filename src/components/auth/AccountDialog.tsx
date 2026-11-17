@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import { SPRING_TACTILE, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
+import { formatUsernameHandle } from '../../lib/friends';
 import { useBibleStore } from '../../store/useBibleStore';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
 
@@ -107,6 +108,7 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
     syncError,
     lastSyncedAt,
     pendingMerge,
+    ownFriendProfile,
     signInWithGoogle,
     signInWithEmail,
     signUpWithEmail,
@@ -455,6 +457,12 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
                         <span>Edit</span>
                       </button>
                     </div>
+                  )}
+
+                  {formatUsernameHandle(ownFriendProfile?.username) && (
+                    <p className="truncate text-xs font-medium text-[var(--color-accent)]">
+                      {formatUsernameHandle(ownFriendProfile?.username)}
+                    </p>
                   )}
 
                   {user.email && (

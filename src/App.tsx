@@ -42,7 +42,6 @@ const SanctuaryAppContent: React.FC = () => {
     user,
     announcement,
     unlockedQueue,
-    pendingInviteCode,
     dismissUnlockedAchievement,
   } = useBibleStore();
 
@@ -134,12 +133,6 @@ const SanctuaryAppContent: React.FC = () => {
       return false;
     });
   }, [navigateToTab]);
-
-  useEffect(() => {
-    if (pendingInviteCode) {
-      navigateToTab('friends');
-    }
-  }, [pendingInviteCode, navigateToTab]);
 
   useEffect(() => {
     document.title = TAB_TITLES[activeTab];

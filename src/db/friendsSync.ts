@@ -3,7 +3,10 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -11,29 +14,36 @@ import {
   where,
   writeBatch,
   type DocumentData,
+  type Query,
   type Timestamp,
 } from 'firebase/firestore';
 import type { AccountUser } from '../lib/auth';
 import { getFirebaseServices } from '../lib/firebase';
 import {
+  buildDirectorySearchPrefixes,
   buildFriendProfileStats,
   DEFAULT_FRIEND_PRIVACY,
-  generateFriendCode,
+  deriveBaseUsername,
   getFriendPairId,
   getOrderedUsersPair,
-  isValidFriendCode,
-  normalizeFriendCode,
+  isValidUsername,
+  matchesDirectoryQuery,
+  normalizeReaderSearchQuery,
+  normalizeUsernameInput,
+  rankDirectoryMatch,
   sanitizeFriendPrivacy,
   sanitizeHttpsPhotoUrl,
+  validateUsername,
 } from '../lib/friends';
 import type {
   AchievementStatus,
   BibleProgressSummary,
-  FriendCodeLookup,
   FriendPrivacySettings,
   FriendProfile,
+  FriendRequestTarget,
   FriendStatsSnapshot,
   FriendshipRecord,
+  ReaderDirectoryEntry,
   ReadingPlan,
   UserPreferences,
 } from '../types/bible';
@@ -74,19 +84,41 @@ function docToStatsSnapshot(raw: unknown): FriendStatsSnapshot {
 }
 
 export function docToFriendProfile(docId: string, data: DocumentData): FriendProfile | null {
-  if (typeof data.friendCode !== 'string' || !isValidFriendCode(data.friendCode)) {
-    return null;
-  }
   const privacy = sanitizeFriendPrivacy(data.privacy as Partial<FriendPrivacySettings> | undefined);
+  const username = isValidUsername(data.username) ? data.username : null;
+  const discoverable =
+    typeof data.discoverable === 'boolean' ? data.discoverable : privacy.discoverable;
   return {
     uid: typeof data.uid === 'string' && data.uid ? data.uid : docId,
     displayName: typeof data.displayName === 'string' ? data.displayName : 'Selah Reader',
     photoURL: sanitizeHttpsPhotoUrl(data.photoURL),
-    friendCode: data.friendCode,
+    username,
+    discoverable,
+    ...(typeof data.friendCode === 'string' && data.friendCode
+      ? { friendCode: data.friendCode }
+      : {}),
     sharingEnabled:
       typeof data.sharingEnabled === 'boolean' ? data.sharingEnabled : privacy.sharingEnabled,
     privacy,
     stats: docToStatsSnapshot(data.stats),
+    updatedAt: data.updatedAt ? timestampToIso(data.updatedAt) : undefined,
+  };
+}
+
+export function docToReaderDirectoryEntry(
+  docId: string,
+  data: DocumentData
+): ReaderDirectoryEntry | null {
+  const uid = typeof data.uid === 'string' && data.uid ? data.uid : docId;
+  if (!uid) return null;
+  return {
+    uid,
+    displayName:
+      typeof data.displayName === 'string' && data.displayName.trim()
+        ? data.displayName.trim()
+        : 'Selah Reader',
+    username: isValidUsername(data.username) ? data.username : null,
+    photoURL: sanitizeHttpsPhotoUrl(data.photoURL),
     updatedAt: data.updatedAt ? timestampToIso(data.updatedAt) : undefined,
   };
 }
@@ -110,8 +142,10 @@ export function docToFriendship(docId: string, data: DocumentData): FriendshipRe
     requesterUid: data.requesterUid,
     recipientUid: data.recipientUid,
     requesterName: typeof data.requesterName === 'string' ? data.requesterName : 'Selah Reader',
+    requesterUsername: isValidUsername(data.requesterUsername) ? data.requesterUsername : null,
     requesterPhotoURL: sanitizeHttpsPhotoUrl(data.requesterPhotoURL),
     recipientName: typeof data.recipientName === 'string' ? data.recipientName : 'Selah Reader',
+    recipientUsername: isValidUsername(data.recipientUsername) ? data.recipientUsername : null,
     recipientPhotoURL: sanitizeHttpsPhotoUrl(data.recipientPhotoURL),
     status: data.status,
     createdAt: timestampToIso(data.createdAt),
@@ -130,9 +164,13 @@ function resolveDisplayName(user: AccountUser): string {
   return 'Selah Reader';
 }
 
+function resolveDirectoryPhotoUrl(user: AccountUser, privacy: FriendPrivacySettings): string | null {
+  return privacy.showPhoto ? sanitizeHttpsPhotoUrl(user.photoURL) : null;
+}
+
 function buildFriendProfilePayload(params: {
   user: AccountUser;
-  friendCode: string;
+  username: string | null;
   summary: BibleProgressSummary;
   achievements: AchievementStatus[];
   preferences: UserPreferences;
@@ -153,7 +191,8 @@ function buildFriendProfilePayload(params: {
       privacy.sharingEnabled && privacy.showPhoto
         ? sanitizeHttpsPhotoUrl(params.user.photoURL)
         : null,
-    friendCode: params.friendCode,
+    username: isValidUsername(params.username) ? params.username : null,
+    discoverable: privacy.discoverable,
     sharingEnabled: privacy.sharingEnabled,
     privacy,
     stats,
@@ -161,15 +200,56 @@ function buildFriendProfilePayload(params: {
   };
 }
 
-async function allocateAvailableFriendCode(db: NonNullable<ReturnType<typeof getFirebaseServices>>['db']): Promise<string> {
+function buildReaderDirectoryPayload(params: {
+  user: AccountUser;
+  username: string | null;
+  privacy: FriendPrivacySettings;
+}): Record<string, unknown> {
+  const displayName = resolveDisplayName(params.user);
+  const cleanUsername = isValidUsername(params.username) ? params.username : null;
+  return {
+    uid: params.user.uid,
+    displayName,
+    displayNameLower: displayName.toLowerCase().slice(0, 100),
+    username: cleanUsername,
+    photoURL: resolveDirectoryPhotoUrl(params.user, params.privacy),
+    searchPrefixes: buildDirectorySearchPrefixes(displayName, cleanUsername),
+    updatedAt: serverTimestamp(),
+  };
+}
+
+async function allocateAvailableUsername(
+  db: NonNullable<ReturnType<typeof getFirebaseServices>>['db'],
+  displayName: string,
+  uid: string
+): Promise<string> {
+  const base = deriveBaseUsername(displayName);
+  const candidates: string[] = [];
+
+  if (base !== 'reader') {
+    candidates.push(base);
+    for (let n = 2; n <= 9; n++) {
+      const withNum = `${base.slice(0, 22)}${n}`;
+      if (isValidUsername(withNum)) candidates.push(withNum);
+    }
+  }
+
   for (let attempt = 0; attempt < 6; attempt++) {
-    const candidate = generateFriendCode();
-    const existing = await getDoc(doc(db, 'friendCodes', candidate));
-    if (!existing.exists()) {
+    const suffix = Math.floor(100 + Math.random() * 9000);
+    const candidate = `${base.slice(0, 18)}.${suffix}`.replace(/\.{2,}/g, '.');
+    if (isValidUsername(candidate)) {
+      candidates.push(candidate);
+    }
+  }
+
+  for (const candidate of candidates) {
+    const snap = await getDoc(doc(db, 'usernames', candidate));
+    if (!snap.exists() || snap.data()?.uid === uid) {
       return candidate;
     }
   }
-  throw new Error('Could not generate a unique friend code. Please try again.');
+
+  throw new Error('Could not reserve a default username right now. Please try again.');
 }
 
 export async function ensureOwnFriendProfile(params: {
@@ -183,89 +263,109 @@ export async function ensureOwnFriendProfile(params: {
   if (!services) return null;
 
   const profileRef = doc(services.db, 'friendProfiles', params.user.uid);
+  const directoryRef = doc(services.db, 'readerDirectory', params.user.uid);
   const existingSnap = await getDoc(profileRef);
   const displayName = resolveDisplayName(params.user);
+  const privacy = sanitizeFriendPrivacy(params.preferences.friendPrivacy ?? DEFAULT_FRIEND_PRIVACY);
+
+  let resolvedUsername: string | null = null;
+  let needClaimUsernameDoc = false;
 
   if (existingSnap.exists()) {
     const parsed = docToFriendProfile(existingSnap.id, existingSnap.data());
-    if (parsed) {
-      const codeRef = doc(services.db, 'friendCodes', parsed.friendCode);
-      const codeSnap = await getDoc(codeRef);
-      if (!codeSnap.exists()) {
-        await setDoc(codeRef, {
-          code: parsed.friendCode,
-          uid: params.user.uid,
-          displayName,
-          updatedAt: serverTimestamp(),
-        });
+    if (parsed?.username && isValidUsername(parsed.username)) {
+      const handleSnap = await getDoc(doc(services.db, 'usernames', parsed.username));
+      if (!handleSnap.exists()) {
+        resolvedUsername = parsed.username;
+        needClaimUsernameDoc = true;
+      } else if (handleSnap.data()?.uid === params.user.uid) {
+        resolvedUsername = parsed.username;
       }
-      const nextPayload = buildFriendProfilePayload({
-        ...params,
-        friendCode: parsed.friendCode,
-      });
-      await setDoc(profileRef, nextPayload);
-      return {
-        uid: params.user.uid,
-        displayName,
-        photoURL: nextPayload.photoURL as string | null,
-        friendCode: parsed.friendCode,
-        sharingEnabled: nextPayload.sharingEnabled as boolean,
-        privacy: nextPayload.privacy as FriendPrivacySettings,
-        stats: nextPayload.stats as FriendStatsSnapshot,
-      };
     }
   }
 
-  const friendCode = await allocateAvailableFriendCode(services.db);
-  const payload = buildFriendProfilePayload({
+  if (!resolvedUsername) {
+    resolvedUsername = await allocateAvailableUsername(services.db, displayName, params.user.uid);
+    const existingHandle = await getDoc(doc(services.db, 'usernames', resolvedUsername));
+    needClaimUsernameDoc = !existingHandle.exists();
+  }
+
+  const profilePayload = buildFriendProfilePayload({
     ...params,
-    friendCode,
+    username: resolvedUsername,
   });
 
   const batch = writeBatch(services.db);
-  batch.set(profileRef, payload);
-  batch.set(doc(services.db, 'friendCodes', friendCode), {
-    code: friendCode,
-    uid: params.user.uid,
-    displayName,
-    updatedAt: serverTimestamp(),
-  });
+  if (needClaimUsernameDoc && resolvedUsername) {
+    batch.set(doc(services.db, 'usernames', resolvedUsername), {
+      username: resolvedUsername,
+      uid: params.user.uid,
+      updatedAt: serverTimestamp(),
+    });
+  }
+  batch.set(profileRef, profilePayload);
+
+  if (privacy.discoverable) {
+    batch.set(
+      directoryRef,
+      buildReaderDirectoryPayload({
+        user: params.user,
+        username: resolvedUsername,
+        privacy,
+      })
+    );
+  } else {
+    batch.delete(directoryRef);
+  }
+
   await batch.commit();
 
   return {
     uid: params.user.uid,
     displayName,
-    photoURL: payload.photoURL as string | null,
-    friendCode,
-    sharingEnabled: payload.sharingEnabled as boolean,
-    privacy: payload.privacy as FriendPrivacySettings,
-    stats: payload.stats as FriendStatsSnapshot,
+    photoURL: profilePayload.photoURL as string | null,
+    username: resolvedUsername,
+    discoverable: privacy.discoverable,
+    sharingEnabled: profilePayload.sharingEnabled as boolean,
+    privacy: profilePayload.privacy as FriendPrivacySettings,
+    stats: profilePayload.stats as FriendStatsSnapshot,
   };
 }
 
 export async function publishOwnFriendStats(params: {
   user: AccountUser;
-  friendCode: string;
+  username: string | null;
   summary: BibleProgressSummary;
   achievements: AchievementStatus[];
   preferences: UserPreferences;
   allPlans: ReadingPlan[];
-  syncCodeName?: boolean;
+  syncDirectory?: boolean;
 }): Promise<FriendProfile | null> {
   const services = getFirebaseServices();
-  if (!services || !isValidFriendCode(params.friendCode)) return null;
+  if (!services) return null;
 
+  const privacy = sanitizeFriendPrivacy(params.preferences.friendPrivacy ?? DEFAULT_FRIEND_PRIVACY);
   const payload = buildFriendProfilePayload(params);
   const profileRef = doc(services.db, 'friendProfiles', params.user.uid);
+  const directoryRef = doc(services.db, 'readerDirectory', params.user.uid);
   const displayName = payload.displayName as string;
+  const cleanUsername = isValidUsername(params.username) ? params.username : null;
 
-  if (params.syncCodeName) {
+  if (params.syncDirectory !== false) {
     const batch = writeBatch(services.db);
     batch.set(profileRef, payload);
-    batch.update(doc(services.db, 'friendCodes', params.friendCode), {
-      displayName,
-      updatedAt: serverTimestamp(),
-    });
+    if (privacy.discoverable) {
+      batch.set(
+        directoryRef,
+        buildReaderDirectoryPayload({
+          user: params.user,
+          username: cleanUsername,
+          privacy,
+        })
+      );
+    } else {
+      batch.delete(directoryRef);
+    }
     await batch.commit();
   } else {
     await setDoc(profileRef, payload);
@@ -275,7 +375,8 @@ export async function publishOwnFriendStats(params: {
     uid: params.user.uid,
     displayName,
     photoURL: payload.photoURL as string | null,
-    friendCode: params.friendCode,
+    username: cleanUsername,
+    discoverable: privacy.discoverable,
     sharingEnabled: payload.sharingEnabled as boolean,
     privacy: payload.privacy as FriendPrivacySettings,
     stats: payload.stats as FriendStatsSnapshot,
@@ -283,42 +384,127 @@ export async function publishOwnFriendStats(params: {
   };
 }
 
-export async function regenerateOwnFriendCode(params: {
+export async function checkUsernameAvailability(
+  rawInput: string,
+  currentUid?: string
+): Promise<{
+  available: boolean;
+  normalized: string;
+  ownedByMe?: boolean;
+  error?: string;
+}> {
+  const normalized = normalizeUsernameInput(rawInput);
+  const validation = validateUsername(rawInput);
+  if (!validation.ok) {
+    return { available: false, normalized, error: validation.error };
+  }
+
+  const services = getFirebaseServices();
+  if (!services) {
+    return {
+      available: false,
+      normalized: validation.username,
+      error: 'Cloud sync is required to check username availability.',
+    };
+  }
+
+  const snap = await getDoc(doc(services.db, 'usernames', validation.username));
+  if (!snap.exists()) {
+    return { available: true, normalized: validation.username };
+  }
+  const ownerUid = snap.data()?.uid;
+  if (currentUid && ownerUid === currentUid) {
+    return { available: true, normalized: validation.username, ownedByMe: true };
+  }
+  return {
+    available: false,
+    normalized: validation.username,
+    error: `@${validation.username} is already taken.`,
+  };
+}
+
+export async function claimCustomUsername(params: {
   user: AccountUser;
-  previousCode: string | null;
+  previousUsername: string | null;
+  nextUsername: string;
   summary: BibleProgressSummary;
   achievements: AchievementStatus[];
   preferences: UserPreferences;
   allPlans: ReadingPlan[];
 }): Promise<FriendProfile | null> {
   const services = getFirebaseServices();
-  if (!services) return null;
+  if (!services) {
+    throw new Error('Cloud sync is required to update your username.');
+  }
 
-  const nextCode = await allocateAvailableFriendCode(services.db);
+  const validation = validateUsername(params.nextUsername);
+  if (!validation.ok) {
+    throw new Error(validation.error);
+  }
+  const cleanNext = validation.username;
+
+  const targetRef = doc(services.db, 'usernames', cleanNext);
+  const targetSnap = await getDoc(targetRef);
+  if (targetSnap.exists() && targetSnap.data()?.uid !== params.user.uid) {
+    throw new Error(`@${cleanNext} is already taken. Choose a different username.`);
+  }
+
+  const privacy = sanitizeFriendPrivacy(params.preferences.friendPrivacy ?? DEFAULT_FRIEND_PRIVACY);
   const payload = buildFriendProfilePayload({
     ...params,
-    friendCode: nextCode,
+    username: cleanNext,
   });
   const displayName = payload.displayName as string;
 
-  const batch = writeBatch(services.db);
-  if (params.previousCode && isValidFriendCode(params.previousCode)) {
-    batch.delete(doc(services.db, 'friendCodes', params.previousCode));
+  let canDeletePrevious = false;
+  if (
+    params.previousUsername &&
+    params.previousUsername !== cleanNext &&
+    isValidUsername(params.previousUsername)
+  ) {
+    const prevSnap = await getDoc(doc(services.db, 'usernames', params.previousUsername));
+    canDeletePrevious = prevSnap.exists() && prevSnap.data()?.uid === params.user.uid;
   }
-  batch.set(doc(services.db, 'friendCodes', nextCode), {
-    code: nextCode,
-    uid: params.user.uid,
-    displayName,
-    updatedAt: serverTimestamp(),
-  });
+
+  const batch = writeBatch(services.db);
+  if (canDeletePrevious && params.previousUsername) {
+    batch.delete(doc(services.db, 'usernames', params.previousUsername));
+  }
+  if (!targetSnap.exists()) {
+    batch.set(targetRef, {
+      username: cleanNext,
+      uid: params.user.uid,
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    batch.update(targetRef, {
+      updatedAt: serverTimestamp(),
+    });
+  }
   batch.set(doc(services.db, 'friendProfiles', params.user.uid), payload);
+
+  const directoryRef = doc(services.db, 'readerDirectory', params.user.uid);
+  if (privacy.discoverable) {
+    batch.set(
+      directoryRef,
+      buildReaderDirectoryPayload({
+        user: params.user,
+        username: cleanNext,
+        privacy,
+      })
+    );
+  } else {
+    batch.delete(directoryRef);
+  }
+
   await batch.commit();
 
   return {
     uid: params.user.uid,
     displayName,
     photoURL: payload.photoURL as string | null,
-    friendCode: nextCode,
+    username: cleanNext,
+    discoverable: privacy.discoverable,
     sharingEnabled: payload.sharingEnabled as boolean,
     privacy: payload.privacy as FriendPrivacySettings,
     stats: payload.stats as FriendStatsSnapshot,
@@ -326,39 +512,118 @@ export async function regenerateOwnFriendCode(params: {
   };
 }
 
-export async function lookupFriendByCode(rawInput: string): Promise<FriendCodeLookup | null> {
+export async function searchReaderDirectory(
+  rawQuery: string,
+  options: { myUid: string; blockedUids?: Iterable<string> }
+): Promise<ReaderDirectoryEntry[]> {
   const services = getFirebaseServices();
   if (!services) {
-    throw new Error('Cloud sync is required to look up friend codes.');
+    throw new Error('Cloud sync is required to search for friends.');
   }
 
-  const normalized = normalizeFriendCode(rawInput);
-  if (!normalized) {
-    throw new Error('Enter an 8-character friend code (for example, K7M4-P9Q2) or invite link.');
+  const { isHandleOnly, cleanQuery, tokens } = normalizeReaderSearchQuery(rawQuery);
+  if (!cleanQuery) return [];
+
+  const dirCol = collection(services.db, 'readerDirectory');
+  const firstToken = tokens[0] ?? cleanQuery;
+  const queriesToRun: Query<DocumentData>[] = [];
+
+  if (firstToken.length >= 2) {
+    queriesToRun.push(
+      query(dirCol, where('searchPrefixes', 'array-contains', firstToken), limit(20))
+    );
+  } else if (!isHandleOnly && firstToken.length === 1) {
+    queriesToRun.push(
+      query(
+        dirCol,
+        where('displayNameLower', '>=', firstToken),
+        where('displayNameLower', '<=', `${firstToken}\uf8ff`),
+        limit(15)
+      )
+    );
   }
 
-  const snap = await getDoc(doc(services.db, 'friendCodes', normalized));
-  if (!snap.exists()) {
-    return null;
+  if (firstToken.length >= 1) {
+    queriesToRun.push(
+      query(
+        dirCol,
+        where('username', '>=', firstToken),
+        where('username', '<=', `${firstToken}\uf8ff`),
+        limit(15)
+      )
+    );
   }
 
-  const data = snap.data();
-  if (typeof data.uid !== 'string' || !data.uid) {
-    return null;
+  if (queriesToRun.length === 0) return [];
+
+  const snapshots = await Promise.all(queriesToRun.map((q) => getDocs(q)));
+  const blockedSet = new Set(options.blockedUids ?? []);
+  const byUid = new Map<string, ReaderDirectoryEntry>();
+
+  for (const snap of snapshots) {
+    snap.forEach((docSnap) => {
+      const entry = docToReaderDirectoryEntry(docSnap.id, docSnap.data());
+      if (!entry) return;
+      if (entry.uid === options.myUid || blockedSet.has(entry.uid)) return;
+      if (!byUid.has(entry.uid)) {
+        byUid.set(entry.uid, entry);
+      }
+    });
   }
 
-  return {
-    code: normalized,
-    uid: data.uid,
-    displayName: typeof data.displayName === 'string' && data.displayName.trim()
-      ? data.displayName.trim()
-      : 'Selah Reader',
-  };
+  return [...byUid.values()]
+    .filter((entry) => matchesDirectoryQuery(entry, rawQuery))
+    .sort((a, b) => {
+      const rankDiff = rankDirectoryMatch(a, rawQuery) - rankDirectoryMatch(b, rawQuery);
+      if (rankDiff !== 0) return rankDiff;
+      return a.displayName.localeCompare(b.displayName);
+    });
+}
+
+export async function fetchSuggestedReaders(options: {
+  myUid: string;
+  excludeUids?: Iterable<string>;
+  maxResults?: number;
+}): Promise<ReaderDirectoryEntry[]> {
+  const services = getFirebaseServices();
+  if (!services) return [];
+
+  const maxResults = Math.max(1, Math.min(20, options.maxResults ?? 8));
+  const excludeSet = new Set(options.excludeUids ?? []);
+  excludeSet.add(options.myUid);
+
+  const snap = await getDocs(
+    query(collection(services.db, 'readerDirectory'), orderBy('updatedAt', 'desc'), limit(20))
+  );
+
+  const results: ReaderDirectoryEntry[] = [];
+  snap.forEach((docSnap) => {
+    const entry = docToReaderDirectoryEntry(docSnap.id, docSnap.data());
+    if (!entry || excludeSet.has(entry.uid)) return;
+    results.push(entry);
+  });
+
+  return results.slice(0, maxResults);
+}
+
+export async function fetchBlockedUids(myUid: string): Promise<string[]> {
+  const services = getFirebaseServices();
+  if (!services || !myUid) return [];
+
+  const snap = await getDocs(collection(services.db, 'users', myUid, 'blockedUsers'));
+  const uids: string[] = [];
+  snap.forEach((docSnap) => {
+    const data = docSnap.data();
+    const uid = typeof data.blockedUid === 'string' && data.blockedUid ? data.blockedUid : docSnap.id;
+    if (uid) uids.push(uid);
+  });
+  return uids;
 }
 
 export async function sendFriendRequest(params: {
   currentUser: AccountUser;
-  target: FriendCodeLookup;
+  ownUsername?: string | null;
+  target: FriendRequestTarget;
   ownPrivacy?: FriendPrivacySettings;
 }): Promise<{ outcome: 'sent' | 'accepted' }> {
   const services = getFirebaseServices();
@@ -367,7 +632,7 @@ export async function sendFriendRequest(params: {
   }
 
   if (params.target.uid === params.currentUser.uid) {
-    throw new Error('That is your own friend code.');
+    throw new Error('You cannot send a friend request to yourself.');
   }
 
   const pairId = getFriendPairId(params.currentUser.uid, params.target.uid);
@@ -384,9 +649,9 @@ export async function sendFriendRequest(params: {
       if (existing.requesterUid === params.currentUser.uid) {
         throw new Error(`You already sent a request to ${params.target.displayName}.`);
       }
-      // Mutual invite: recipient already requested us, so accept cleanly
       await acceptFriendRequest({
         currentUser: params.currentUser,
+        ownUsername: params.ownUsername,
         pairId,
         ownPrivacy: params.ownPrivacy,
       });
@@ -407,9 +672,11 @@ export async function sendFriendRequest(params: {
       requesterUid: params.currentUser.uid,
       recipientUid: params.target.uid,
       requesterName: resolveDisplayName(params.currentUser),
+      requesterUsername: isValidUsername(params.ownUsername) ? params.ownUsername : null,
       requesterPhotoURL,
       recipientName: params.target.displayName.trim().slice(0, 100) || 'Selah Reader',
-      recipientPhotoURL: null,
+      recipientUsername: isValidUsername(params.target.username) ? params.target.username : null,
+      recipientPhotoURL: sanitizeHttpsPhotoUrl(params.target.photoURL),
       status: 'pending',
       createdAt: serverTimestamp(),
       acceptedAt: null,
@@ -431,6 +698,7 @@ export async function sendFriendRequest(params: {
 
 export async function acceptFriendRequest(params: {
   currentUser: AccountUser;
+  ownUsername?: string | null;
   pairId: string;
   ownPrivacy?: FriendPrivacySettings;
 }): Promise<void> {
@@ -446,6 +714,7 @@ export async function acceptFriendRequest(params: {
   await updateDoc(doc(services.db, 'friendships', params.pairId), {
     status: 'accepted',
     recipientName: resolveDisplayName(params.currentUser),
+    recipientUsername: isValidUsername(params.ownUsername) ? params.ownUsername : null,
     recipientPhotoURL,
     acceptedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),

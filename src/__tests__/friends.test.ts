@@ -3,22 +3,25 @@ import { BIBLE_BOOKS, TOTAL_CANON_CHAPTERS } from '../data/bibleCanon';
 import { DEFAULT_PREFERENCES } from '../db/repository';
 import { evaluateAchievements } from '../lib/achievementsEngine';
 import {
+  buildDirectorySearchPrefixes,
   buildFriendProfileStats,
   computeFriendStatsSignature,
   decodeBookProgressSpec,
   DEFAULT_FRIEND_PRIVACY,
+  deriveBaseUsername,
   encodeBookProgressSpec,
-  extractInviteCodeFromLocation,
-  formatFriendCode,
-  FRIEND_CODE_ALPHABET,
+  formatUsernameHandle,
   getFriendCounterpart,
   getFriendPairId,
   getOrderedUsersPair,
-  generateFriendCode,
-  isValidFriendCode,
-  normalizeFriendCode,
+  isValidUsername,
+  matchesDirectoryQuery,
+  normalizeReaderSearchQuery,
+  normalizeUsernameInput,
+  rankDirectoryMatch,
   sanitizeFriendPrivacy,
   sanitizeHttpsPhotoUrl,
+  validateUsername,
 } from '../lib/friends';
 import { READING_PLANS } from '../data/readingPlans';
 import { computeBibleProgress } from '../lib/progress';
@@ -41,43 +44,71 @@ function makeLog(
   };
 }
 
-describe('friend codes & pair helpers', () => {
-  it('generates 8-character codes restricted to the unambiguous Crockford-style alphabet', () => {
-    for (let i = 0; i < 60; i++) {
-      const code = generateFriendCode();
-      expect(code).toHaveLength(8);
-      expect(isValidFriendCode(code)).toBe(true);
-      expect(code).not.toMatch(/[0O1IL]/);
-      for (const ch of code) {
-        expect(FRIEND_CODE_ALPHABET).toContain(ch);
-      }
-    }
+describe('usernames, search indexing & pair helpers', () => {
+  it('validates and normalizes @username handles safely', () => {
+    expect(normalizeUsernameInput('  @Hannah.Miller  ')).toBe('hannah.miller');
+    expect(validateUsername('@hannah.miller')).toEqual({ ok: true, username: 'hannah.miller' });
+    expect(validateUsername('david_99')).toEqual({ ok: true, username: 'david_99' });
+    expect(isValidUsername('hannah.miller')).toBe(true);
+    expect(formatUsernameHandle('hannah.miller')).toBe('@hannah.miller');
+    expect(formatUsernameHandle(null)).toBeNull();
+
+    // Reject too short, too long, leading/trailing punctuation, consecutive dots, reserved, or invalid chars
+    expect(validateUsername('ab').ok).toBe(false);
+    expect(validateUsername('a'.repeat(25)).ok).toBe(false);
+    expect(validateUsername('.hannah').ok).toBe(false);
+    expect(validateUsername('hannah_').ok).toBe(false);
+    expect(validateUsername('hannah..m').ok).toBe(false);
+    expect(validateUsername('hannah!m').ok).toBe(false);
+    expect(validateUsername('admin').ok).toBe(false);
+    expect(validateUsername('selah').ok).toBe(false);
   });
 
-  it('normalizes raw codes, SELAH prefixes, whitespace, and full invite URLs', () => {
-    expect(normalizeFriendCode('k7m4 p9q2')).toBe('K7M4P9Q2');
-    expect(normalizeFriendCode('SELAH-k7m4-p9q2')).toBe('K7M4P9Q2');
-    expect(normalizeFriendCode('https://inchbrayock.github.io/Selah/?addFriend=K7M4-P9Q2')).toBe(
-      'K7M4P9Q2'
-    );
-    expect(normalizeFriendCode('http://localhost:5173/?view=friends&addFriend=selah-k7m4p9q2#top')).toBe(
-      'K7M4P9Q2'
-    );
-
-    // Ambiguous characters (0, O, 1, I, L) and invalid lengths must return null
-    expect(normalizeFriendCode('07M4P9Q2')).toBeNull();
-    expect(normalizeFriendCode('O7M4P9Q2')).toBeNull();
-    expect(normalizeFriendCode('17M4P9Q2')).toBeNull();
-    expect(normalizeFriendCode('I7M4P9Q2')).toBeNull();
-    expect(normalizeFriendCode('L7M4P9Q2')).toBeNull();
-    expect(normalizeFriendCode('K7M4P9Q')).toBeNull();
-    expect(normalizeFriendCode('K7M4P9Q2Z')).toBeNull();
-    expect(normalizeFriendCode('')).toBeNull();
+  it('derives clean base usernames from display names including international characters', () => {
+    expect(deriveBaseUsername('Hannah Miller')).toBe('hannah.miller');
+    expect(deriveBaseUsername('José Alvarez')).toBe('jose.alvarez');
+    expect(deriveBaseUsername('Dr. Luke!')).toBe('dr.luke');
+    expect(deriveBaseUsername('Jo')).toBe('jo.reader');
+    expect(deriveBaseUsername('')).toBe('reader');
+    expect(deriveBaseUsername('Selah')).toBe('selah.reader');
   });
 
-  it('formats 8-character friend codes as XXXX-XXXX', () => {
-    expect(formatFriendCode('k7m4p9q2')).toBe('K7M4-P9Q2');
-    expect(formatFriendCode('K7M4-P9Q2')).toBe('K7M4-P9Q2');
+  it('builds search prefixes for first names, last names, folded accents, and @username segments', () => {
+    const prefixes = buildDirectorySearchPrefixes('José Alvarez-Cohen', 'jose.alvarez');
+    expect(prefixes).toContain('jo');
+    expect(prefixes).toContain('jose');
+    expect(prefixes).toContain('josé');
+    expect(prefixes).toContain('alvarez');
+    expect(prefixes).toContain('cohen');
+    expect(prefixes).toContain('jose.alvarez');
+    expect(prefixes.length).toBeLessThanOrEqual(60);
+  });
+
+  it('matches and ranks Instagram/Facebook-style name and @handle queries', () => {
+    const hannah = { displayName: 'Hannah Miller', username: 'hannah.miller' };
+    const miriam = { displayName: 'Miriam Cohen', username: 'miriam' };
+    const otherMiriam = { displayName: 'Anna Miriam', username: 'anna.reads' };
+
+    expect(normalizeReaderSearchQuery('  @Miriam  ')).toEqual({
+      rawTrimmed: '@Miriam',
+      isHandleOnly: true,
+      cleanQuery: 'miriam',
+      tokens: ['miriam'],
+    });
+
+    // Multi-word name search narrows matches accurately
+    expect(matchesDirectoryQuery(hannah, 'Hannah M')).toBe(true);
+    expect(matchesDirectoryQuery(hannah, 'Miller')).toBe(true);
+    expect(matchesDirectoryQuery(hannah, 'Hannah Z')).toBe(false);
+
+    // Leading @ filters strictly by username handle
+    expect(matchesDirectoryQuery(miriam, '@miriam')).toBe(true);
+    expect(matchesDirectoryQuery(otherMiriam, '@miriam')).toBe(false);
+
+    // Exact handle ranks highest, then prefix, then word match
+    expect(rankDirectoryMatch(miriam, 'miriam')).toBeLessThan(
+      rankDirectoryMatch(otherMiriam, 'miriam')
+    );
   });
 
   it('orders pair IDs symmetrically using ASCII/UTF-8 code point order matching Firestore rules', () => {
@@ -98,10 +129,19 @@ describe('friend codes & pair helpers', () => {
     expect(sanitizeHttpsPhotoUrl(`https://example.com/${'a'.repeat(1000)}`)).toBeNull();
   });
 
-  it('extracts invite codes from query search strings', () => {
-    expect(extractInviteCodeFromLocation('?addFriend=K7M4-P9Q2')).toBe('K7M4P9Q2');
-    expect(extractInviteCodeFromLocation('?addFriend=invalid')).toBeNull();
-    expect(extractInviteCodeFromLocation('')).toBeNull();
+  it('defaults discoverable to true when sanitizing legacy 7-key privacy settings', () => {
+    const legacy = sanitizeFriendPrivacy({
+      sharingEnabled: false,
+      showPhoto: true,
+      showStreak: false,
+      showRecentBook: true,
+      showBookProgress: true,
+      showSealsCount: true,
+      showActivePlan: false,
+    });
+    expect(legacy.discoverable).toBe(true);
+    expect(legacy.sharingEnabled).toBe(false);
+    expect(sanitizeFriendPrivacy({ discoverable: false }).discoverable).toBe(false);
   });
 });
 
@@ -232,15 +272,17 @@ describe('bookProgressSpec encoding and friend stats snapshot', () => {
     expect(selectiveStats.lastReadDate).toBe('2026-03-03');
   });
 
-  it('extracts friendship counterpart cleanly and computes deterministic stats signatures', () => {
+  it('extracts friendship counterpart cleanly with username and computes deterministic stats signatures', () => {
     const friendship: FriendshipRecord = {
       id: 'u1_u2',
       users: ['u1', 'u2'],
       requesterUid: 'u1',
       recipientUid: 'u2',
       requesterName: 'Hannah',
+      requesterUsername: 'hannah',
       requesterPhotoURL: null,
       recipientName: 'David',
+      recipientUsername: 'david.k',
       recipientPhotoURL: 'https://example.com/david.png',
       status: 'accepted',
       createdAt: '2026-03-01T00:00:00.000Z',
@@ -251,18 +293,21 @@ describe('bookProgressSpec encoding and friend stats snapshot', () => {
     expect(getFriendCounterpart(friendship, 'u1')).toEqual({
       uid: 'u2',
       displayName: 'David',
+      username: 'david.k',
       photoURL: 'https://example.com/david.png',
     });
     expect(getFriendCounterpart(friendship, 'u2')).toEqual({
       uid: 'u1',
       displayName: 'Hannah',
+      username: 'hannah',
       photoURL: null,
     });
 
     const sigInput = {
       displayName: 'Hannah',
       photoURL: null,
-      friendCode: 'K7M4P9Q2',
+      username: 'hannah',
+      discoverable: true,
       sharingEnabled: true,
       privacy: DEFAULT_FRIEND_PRIVACY,
       stats: {

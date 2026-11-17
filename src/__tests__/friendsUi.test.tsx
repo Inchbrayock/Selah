@@ -1,11 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountUser } from '../lib/auth';
 import type {
   CustomPlanDefinition,
-  FriendCodeLookup,
   FriendProfile,
   FriendshipRecord,
+  ReaderDirectoryEntry,
   ReadingLogEntry,
   UserPreferences,
 } from '../types/bible';
@@ -43,8 +43,11 @@ const friendsSyncState = vi.hoisted(() => ({
 const friendsMocks = vi.hoisted(() => ({
   ensureOwnFriendProfile: vi.fn(),
   publishOwnFriendStats: vi.fn().mockResolvedValue(undefined),
-  regenerateOwnFriendCode: vi.fn(),
-  lookupFriendByCode: vi.fn(),
+  checkUsernameAvailability: vi.fn(),
+  claimCustomUsername: vi.fn(),
+  searchReaderDirectory: vi.fn().mockResolvedValue([]),
+  fetchSuggestedReaders: vi.fn().mockResolvedValue([]),
+  fetchBlockedUids: vi.fn().mockResolvedValue([]),
   sendFriendRequest: vi.fn(),
   acceptFriendRequest: vi.fn().mockResolvedValue(undefined),
   deleteFriendship: vi.fn().mockResolvedValue(undefined),
@@ -93,8 +96,11 @@ vi.mock('../db/cloudSync', () => ({
 vi.mock('../db/friendsSync', () => ({
   ensureOwnFriendProfile: (...args: unknown[]) => friendsMocks.ensureOwnFriendProfile(...args),
   publishOwnFriendStats: (...args: unknown[]) => friendsMocks.publishOwnFriendStats(...args),
-  regenerateOwnFriendCode: (...args: unknown[]) => friendsMocks.regenerateOwnFriendCode(...args),
-  lookupFriendByCode: (...args: unknown[]) => friendsMocks.lookupFriendByCode(...args),
+  checkUsernameAvailability: (...args: unknown[]) => friendsMocks.checkUsernameAvailability(...args),
+  claimCustomUsername: (...args: unknown[]) => friendsMocks.claimCustomUsername(...args),
+  searchReaderDirectory: (...args: unknown[]) => friendsMocks.searchReaderDirectory(...args),
+  fetchSuggestedReaders: (...args: unknown[]) => friendsMocks.fetchSuggestedReaders(...args),
+  fetchBlockedUids: (...args: unknown[]) => friendsMocks.fetchBlockedUids(...args),
   sendFriendRequest: (...args: unknown[]) => friendsMocks.sendFriendRequest(...args),
   acceptFriendRequest: (...args: unknown[]) => friendsMocks.acceptFriendRequest(...args),
   deleteFriendship: (...args: unknown[]) => friendsMocks.deleteFriendship(...args),
@@ -158,7 +164,8 @@ const HANNAH_PROFILE: FriendProfile = {
   uid: 'uid_hannah',
   displayName: 'Hannah',
   photoURL: null,
-  friendCode: 'H7M4P9Q2',
+  username: 'hannah',
+  discoverable: true,
   sharingEnabled: true,
   privacy: { ...DEFAULT_FRIEND_PRIVACY },
   stats: {
@@ -181,7 +188,8 @@ const MIRIAM_PROFILE: FriendProfile = {
   uid: 'uid_miriam',
   displayName: 'Miriam',
   photoURL: null,
-  friendCode: 'M9N2K4V7',
+  username: 'miriam',
+  discoverable: true,
   sharingEnabled: true,
   privacy: { ...DEFAULT_FRIEND_PRIVACY },
   stats: {
@@ -200,6 +208,13 @@ const MIRIAM_PROFILE: FriendProfile = {
   },
 };
 
+const RUTH_ENTRY: ReaderDirectoryEntry = {
+  uid: 'uid_ruth',
+  displayName: 'Ruth Chen',
+  username: 'ruth.chen',
+  photoURL: null,
+};
+
 function emitAuth(user: AccountUser | null) {
   authState.currentUser = user;
   for (const listener of authState.listeners) {
@@ -207,7 +222,7 @@ function emitAuth(user: AccountUser | null) {
   }
 }
 
-describe('Reading Circle UI and workflows', () => {
+describe('Reading Circle UI and social friend discovery workflows', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
@@ -230,9 +245,16 @@ describe('Reading Circle UI and workflows', () => {
     cloudMocks.fetchCloudCustomPlans.mockResolvedValue([] as CustomPlanDefinition[]);
     cloudMocks.subscribeCloudSanctuary.mockImplementation(() => () => {});
     friendsMocks.ensureOwnFriendProfile.mockResolvedValue(HANNAH_PROFILE);
+    friendsMocks.fetchSuggestedReaders.mockResolvedValue([]);
+    friendsMocks.searchReaderDirectory.mockResolvedValue([]);
+    friendsMocks.fetchBlockedUids.mockResolvedValue([]);
+    friendsMocks.checkUsernameAvailability.mockResolvedValue({
+      available: true,
+      normalized: 'hannah.reads',
+    });
   });
 
-  it('opens Reading Circle from the header while signed out and preserves the 4 primary tabs', async () => {
+  it('opens Reading Circle while signed out without friend codes and preserves the 4 primary tabs', async () => {
     render(<App />);
 
     const friendsButton = await screen.findByRole('button', { name: 'Open Reading Circle' });
@@ -241,65 +263,142 @@ describe('Reading Circle UI and workflows', () => {
     expect(await screen.findByRole('heading', { name: 'Reading Circle' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Sign in to read alongside friends' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in to connect' })).toBeInTheDocument();
+    expect(screen.queryByText(/friend code/i)).not.toBeInTheDocument();
 
-    // Primary nav tabs remain the 4 core views
     const navButtons = screen.getByRole('navigation', { name: 'Primary' }).querySelectorAll('button');
     expect(navButtons).toHaveLength(4);
   });
 
-  it('consumes ?addFriend invite links across sign-in and looks up & sends a request', async () => {
-    window.history.replaceState(null, '', '/?addFriend=R7M4-P9Q2');
-
-    const ruthLookup: FriendCodeLookup = {
-      code: 'R7M4P9Q2',
-      uid: 'uid_ruth',
-      displayName: 'Ruth',
-    };
-    friendsMocks.lookupFriendByCode.mockResolvedValue(ruthLookup);
+  it('searches readers live by name or @username, sends an inline Add friend request, and edits @username', async () => {
+    friendsMocks.fetchSuggestedReaders.mockResolvedValue([RUTH_ENTRY]);
+    friendsMocks.searchReaderDirectory.mockResolvedValue([RUTH_ENTRY]);
     friendsMocks.sendFriendRequest.mockResolvedValue({ outcome: 'sent' });
+    friendsMocks.claimCustomUsername.mockResolvedValue({
+      ...HANNAH_PROFILE,
+      username: 'hannah.reads',
+    });
 
+    authState.currentUser = HANNAH;
     render(<App />);
 
-    // ?addFriend lands automatically on Reading Circle with invite banner while signed out
-    expect(
-      await screen.findByRole('heading', { name: 'Sign in to open invite R7M4-P9Q2' })
-    ).toBeInTheDocument();
-    expect(window.location.search).toBe('');
-
-    // Simulate signing in
-    await act(async () => {
-      emitAuth(HANNAH);
+    await waitFor(() => {
+      expect(friendsMocks.subscribeFriendships).toHaveBeenCalled();
     });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Reading Circle' }));
+
+    // Own @handle pill shows cleanly without any 8-char friend code
+    expect(await screen.findByRole('button', { name: /@hannah/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Share invite link/i)).not.toBeInTheDocument();
+
+    // Suggested readers ("People you may know") appear before searching
+    expect(await screen.findByText('People you may know')).toBeInTheDocument();
+    expect(screen.getByText('Ruth Chen')).toBeInTheDocument();
+    expect(screen.getByText('@ruth.chen')).toBeInTheDocument();
+
+    // Live search by name or @username
+    const searchInput = screen.getByRole('searchbox', {
+      name: /Search people by name or @username/i,
+    });
+    fireEvent.change(searchInput, { target: { value: 'Ruth' } });
 
     await waitFor(() => {
-      expect(friendsMocks.lookupFriendByCode).toHaveBeenCalledWith('R7M4-P9Q2');
+      expect(friendsMocks.searchReaderDirectory).toHaveBeenCalledWith(
+        'Ruth',
+        expect.objectContaining({ myUid: 'uid_hannah' })
+      );
     });
 
-    expect(await screen.findByText('Ruth')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
+    const addBtn = await screen.findByRole('button', { name: 'Add friend' });
+    fireEvent.click(addBtn);
 
     await waitFor(() => {
       expect(friendsMocks.sendFriendRequest).toHaveBeenCalledWith(
         expect.objectContaining({
           currentUser: expect.objectContaining({ uid: 'uid_hannah' }),
-          target: ruthLookup,
+          ownUsername: 'hannah',
+          target: expect.objectContaining({
+            uid: 'uid_ruth',
+            displayName: 'Ruth Chen',
+            username: 'ruth.chen',
+          }),
         })
       );
     });
 
-    expect(await screen.findByText('Request sent to Ruth.')).toBeInTheDocument();
+    expect(await screen.findByText('Friend request sent to Ruth Chen.')).toBeInTheDocument();
+
+    // Simulate snapshot transitioning Ruth to outgoing pending -> search row updates to Requested + Cancel
+    await act(async () => {
+      friendsSyncState.onFriendshipsCb?.(
+        [
+          {
+            id: 'uid_hannah_uid_ruth',
+            users: ['uid_hannah', 'uid_ruth'],
+            requesterUid: 'uid_hannah',
+            recipientUid: 'uid_ruth',
+            requesterName: 'Hannah',
+            requesterUsername: 'hannah',
+            requesterPhotoURL: null,
+            recipientName: 'Ruth Chen',
+            recipientUsername: 'ruth.chen',
+            recipientPhotoURL: null,
+            status: 'pending',
+            createdAt: '2026-03-03T10:00:00.000Z',
+            acceptedAt: null,
+            updatedAt: '2026-03-03T10:00:00.000Z',
+          },
+        ],
+        false
+      );
+    });
+
+    const searchSection = screen.getByRole('heading', { name: 'Find friends' }).closest('section')!;
+    expect(within(searchSection).getByText('Requested')).toBeInTheDocument();
+    fireEvent.click(
+      within(searchSection).getByRole('button', { name: 'Cancel friend request to Ruth Chen' })
+    );
+    await waitFor(() => {
+      expect(friendsMocks.deleteFriendship).toHaveBeenCalledWith('uid_hannah_uid_ruth');
+    });
+
+    // Edit own @username with live availability check
+    fireEvent.click(screen.getByRole('button', { name: /@hannah/i }));
+    const handleInput = await screen.findByLabelText('Your @username');
+    fireEvent.change(handleInput, { target: { value: 'hannah.reads' } });
+
+    await waitFor(() => {
+      expect(friendsMocks.checkUsernameAvailability).toHaveBeenCalledWith(
+        'hannah.reads',
+        'uid_hannah'
+      );
+    });
+    expect(await screen.findByText('@hannah.reads is available')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save username' }));
+    await waitFor(() => {
+      expect(friendsMocks.claimCustomUsername).toHaveBeenCalledWith(
+        expect.objectContaining({
+          nextUsername: 'hannah.reads',
+          previousUsername: 'hannah',
+        })
+      );
+    });
+    expect(await screen.findByText('Username saved as @hannah.reads')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /@hannah\.reads/i })).toBeInTheDocument();
   });
 
-  it('handles incoming/outgoing requests, inspects Friend Folio & MiniCanonicalSpine, toggles privacy, and regenerates code', async () => {
+  it('handles incoming/outgoing requests, inspects Friend Folio & MiniCanonicalSpine, and toggles search privacy', async () => {
     const incomingFromMiriam: FriendshipRecord = {
       id: 'uid_hannah_uid_miriam',
       users: ['uid_hannah', 'uid_miriam'],
       requesterUid: 'uid_miriam',
       recipientUid: 'uid_hannah',
       requesterName: 'Miriam',
+      requesterUsername: 'miriam',
       requesterPhotoURL: null,
       recipientName: 'Hannah',
+      recipientUsername: 'hannah',
       recipientPhotoURL: null,
       status: 'pending',
       createdAt: '2026-03-01T10:00:00.000Z',
@@ -313,8 +412,10 @@ describe('Reading Circle UI and workflows', () => {
       requesterUid: 'uid_hannah',
       recipientUid: 'uid_luke',
       requesterName: 'Hannah',
+      requesterUsername: 'hannah',
       requesterPhotoURL: null,
       recipientName: 'Luke',
+      recipientUsername: 'luke',
       recipientPhotoURL: null,
       status: 'pending',
       createdAt: '2026-03-02T10:00:00.000Z',
@@ -333,37 +434,34 @@ describe('Reading Circle UI and workflows', () => {
       friendsSyncState.onFriendshipsCb?.([incomingFromMiriam, outgoingToLuke], false);
     });
 
-    // Dashboard quiet Reading Circle strip reflects incoming request
     const dashboardStrip = await screen.findByRole('region', { name: 'Reading Circle summary' });
     expect(dashboardStrip).toHaveTextContent('1 incoming request');
     expect(
       screen.getByRole('button', { name: 'Open Reading Circle (1 pending request)' })
     ).toBeInTheDocument();
 
-    // Open Reading Circle from Dashboard strip
     fireEvent.click(screen.getByRole('button', { name: 'Open Reading Circle' }));
 
-    expect(await screen.findByText('H7M4-P9Q2', {}, { timeout: 3000 })).toBeInTheDocument();
-    expect(screen.getByText('Miriam')).toBeInTheDocument();
+    expect(await screen.findByText('Miriam')).toBeInTheDocument();
+    expect(screen.getByText('@miriam')).toBeInTheDocument();
     expect(screen.getByText('Luke')).toBeInTheDocument();
+    expect(screen.getByText('@luke')).toBeInTheDocument();
 
-    // Cancel outgoing request
     fireEvent.click(screen.getByRole('button', { name: 'Cancel request' }));
     await waitFor(() => {
       expect(friendsMocks.deleteFriendship).toHaveBeenCalledWith('uid_hannah_uid_luke');
     });
 
-    // Accept Miriam's request
     fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
     await waitFor(() => {
       expect(friendsMocks.acceptFriendRequest).toHaveBeenCalledWith(
         expect.objectContaining({
           pairId: 'uid_hannah_uid_miriam',
+          ownUsername: 'hannah',
         })
       );
     });
 
-    // Simulate snapshot transitioning Miriam to accepted and pushing Miriam's FriendProfile
     const acceptedMiriam: FriendshipRecord = {
       ...incomingFromMiriam,
       status: 'accepted',
@@ -386,32 +484,46 @@ describe('Reading Circle UI and workflows', () => {
     expect(await screen.findByText('1 friend connected')).toBeInTheDocument();
     expect(screen.getByText(/7 days streak/i)).toBeInTheDocument();
 
-    // Click friend row to inspect FriendFolioDialog
     fireEvent.click(screen.getByRole('button', { name: /Miriam/i }));
 
     const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('@miriam');
     expect(dialog).toHaveTextContent('54 / 1,189 ch');
     expect(dialog).toHaveTextContent('1 of 66 books completed');
     expect(dialog).toHaveTextContent('5 earned');
 
-    // Interactive MiniCanonicalSpine segment focuses cleanly
     const genesisSpineBtn = screen.getByRole('button', { name: 'Genesis: 50 of 50 chapters' });
     fireEvent.focus(genesisSpineBtn);
     expect(dialog).toHaveTextContent('Genesis: 50 of 50 chapters');
 
-    // Remove friend confirmation inside FriendFolioDialog
     fireEvent.click(screen.getByRole('button', { name: 'Remove friend' }));
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     await waitFor(() => {
       expect(friendsMocks.deleteFriendship).toHaveBeenCalledWith('uid_hannah_uid_miriam');
     });
 
-    // Toggle Circle privacy and verify preference sync
+    // Toggle Circle privacy (both people search discoverability & reading metrics)
     fireEvent.click(screen.getByRole('button', { name: 'Privacy' }));
+    const discoverableCheckbox = screen.getByRole('checkbox', {
+      name: /Appear in people search/i,
+    });
+    expect(discoverableCheckbox).toBeChecked();
+    fireEvent.click(discoverableCheckbox);
+
+    await waitFor(() => {
+      expect(cloudMocks.saveCloudPreferences).toHaveBeenCalledWith(
+        'uid_hannah',
+        expect.objectContaining({
+          friendPrivacy: expect.objectContaining({
+            discoverable: false,
+          }),
+        })
+      );
+    });
+
     const progressCheckbox = screen.getByRole('checkbox', {
       name: /66-book progress and chapter totals/i,
     });
-    expect(progressCheckbox).toBeChecked();
     fireEvent.click(progressCheckbox);
 
     await waitFor(() => {
@@ -424,20 +536,6 @@ describe('Reading Circle UI and workflows', () => {
         })
       );
     });
-
-    // Regenerate friend code via InlineDeleteConfirm
-    friendsMocks.regenerateOwnFriendCode.mockResolvedValue({
-      ...HANNAH_PROFILE,
-      friendCode: 'Z8W3Q5Y9',
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'New code' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Replace code' }));
-
-    await waitFor(() => {
-      expect(friendsMocks.regenerateOwnFriendCode).toHaveBeenCalled();
-    });
-    expect(await screen.findByText('Z8W3-Q5Y9')).toBeInTheDocument();
-    expect(await screen.findByText('New friend code ready')).toBeInTheDocument();
   });
 
   it('blocks an incoming requester via inline confirmation and navigates from Settings', async () => {
@@ -447,8 +545,10 @@ describe('Reading Circle UI and workflows', () => {
       requesterUid: 'uid_stranger',
       recipientUid: 'uid_hannah',
       requesterName: 'Stranger',
+      requesterUsername: 'stranger',
       requesterPhotoURL: null,
       recipientName: 'Hannah',
+      recipientUsername: 'hannah',
       recipientPhotoURL: null,
       status: 'pending',
       createdAt: '2026-03-01T10:00:00.000Z',
@@ -467,7 +567,6 @@ describe('Reading Circle UI and workflows', () => {
       friendsSyncState.onFriendshipsCb?.([incomingSpam], false);
     });
 
-    // Open Reading Circle from header badge button
     fireEvent.click(
       await screen.findByRole('button', { name: 'Open Reading Circle (1 pending request)' })
     );
@@ -492,7 +591,6 @@ describe('Reading Circle UI and workflows', () => {
       });
     });
 
-    // Navigate to Settings via Account popover and verify Reading Circle & privacy link returns here
     fireEvent.click(screen.getByRole('button', { name: /Open account and cloud sync/i }));
     fireEvent.click(await screen.findByRole('button', { name: /Settings/i }, { timeout: 3000 }));
     const circleLink = await screen.findByRole(
@@ -525,8 +623,10 @@ describe('Reading Circle UI and workflows', () => {
       requesterUid: 'uid_miriam',
       recipientUid: 'uid_hannah',
       requesterName: 'Miriam',
+      requesterUsername: 'miriam',
       requesterPhotoURL: null,
       recipientName: 'Hannah',
+      recipientUsername: 'hannah',
       recipientPhotoURL: null,
       status: 'accepted',
       createdAt: '2026-03-01T10:00:00.000Z',
@@ -550,7 +650,6 @@ describe('Reading Circle UI and workflows', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open Reading Circle' }));
     expect(await screen.findByRole('heading', { name: 'Reading Circle' })).toBeInTheDocument();
 
-    // Even if Dexie friendCache finishes AFTER live server empty snapshot, stale cache must not overwrite or mark offline
     await act(async () => {
       resolveLateCache({
         ownerUid: HANNAH.uid,
@@ -566,7 +665,6 @@ describe('Reading Circle UI and workflows', () => {
     ).not.toBeInTheDocument();
     expect(screen.getByText('No friends connected yet')).toBeInTheDocument();
 
-    // Emit cached snapshot first -> offline banner shows
     await act(async () => {
       friendsSyncState.onFriendshipsCb?.([cachedMiriam], true);
     });
@@ -574,7 +672,6 @@ describe('Reading Circle UI and workflows', () => {
       await screen.findByText(/Offline — showing your last synced Reading Circle snapshot/i)
     ).toBeInTheDocument();
 
-    // Emit server-confirmed snapshot with unchanged docs -> offline banner clears
     await act(async () => {
       friendsSyncState.onFriendshipsCb?.([cachedMiriam], false);
     });
@@ -610,5 +707,17 @@ describe('Reading Circle UI and workflows', () => {
       expect(friendsMocks.subscribeFriendships).toHaveBeenCalledTimes(2);
       expect(screen.queryByText('Transient connection lost')).not.toBeInTheDocument();
     });
+  });
+
+  it('transitions signed-out to signed-in smoothly and shows @username in Account popover', async () => {
+    render(<App />);
+
+    await act(async () => {
+      emitAuth(HANNAH);
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Open account and cloud sync/i }));
+    const popover = await screen.findByTestId('account-popover');
+    expect(within(popover).getByText('@hannah')).toBeInTheDocument();
   });
 });

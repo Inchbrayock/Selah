@@ -6,17 +6,35 @@ import type {
   FriendProfile,
   FriendStatsSnapshot,
   FriendshipRecord,
+  ReaderDirectoryEntry,
   ReadingPlan,
   UserPreferences,
 } from '../types/bible';
-import { isNativePlatform } from './nativeShell';
 
-/** Unambiguous 31-character alphabet (omits 0, O, 1, I, L) for manual code entry. */
-export const FRIEND_CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
-export const FRIEND_CODE_REGEX = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$/;
+export const USERNAME_MIN_LENGTH = 3;
+export const USERNAME_MAX_LENGTH = 24;
+export const USERNAME_REGEX = /^[a-z0-9][a-z0-9._]{1,22}[a-z0-9]$/;
+export const MAX_SEARCH_PREFIXES = 60;
+
+const RESERVED_USERNAMES = new Set([
+  'admin',
+  'administrator',
+  'selah',
+  'support',
+  'system',
+  'moderator',
+  'staff',
+  'official',
+  'help',
+  'null',
+  'undefined',
+  'anonymous',
+  'guest',
+]);
 
 export const DEFAULT_FRIEND_PRIVACY: FriendPrivacySettings = {
   sharingEnabled: true,
+  discoverable: true,
   showPhoto: true,
   showStreak: true,
   showRecentBook: true,
@@ -33,6 +51,10 @@ export function sanitizeFriendPrivacy(
       typeof input?.sharingEnabled === 'boolean'
         ? input.sharingEnabled
         : DEFAULT_FRIEND_PRIVACY.sharingEnabled,
+    discoverable:
+      typeof input?.discoverable === 'boolean'
+        ? input.discoverable
+        : DEFAULT_FRIEND_PRIVACY.discoverable,
     showPhoto:
       typeof input?.showPhoto === 'boolean' ? input.showPhoto : DEFAULT_FRIEND_PRIVACY.showPhoto,
     showStreak:
@@ -56,55 +78,202 @@ export function sanitizeFriendPrivacy(
   };
 }
 
-export function generateFriendCode(): string {
-  const bytes = new Uint8Array(8);
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = Math.floor(Math.random() * 256);
+export function normalizeUsernameInput(raw: string): string {
+  return raw.trim().replace(/^@+/, '').toLowerCase();
+}
+
+export function isValidUsername(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  if (value.length < USERNAME_MIN_LENGTH || value.length > USERNAME_MAX_LENGTH) return false;
+  if (!USERNAME_REGEX.test(value)) return false;
+  if (value.includes('..')) return false;
+  if (RESERVED_USERNAMES.has(value)) return false;
+  return true;
+}
+
+export function validateUsername(
+  raw: string
+): { ok: true; username: string } | { ok: false; error: string } {
+  const normalized = normalizeUsernameInput(raw);
+  if (!normalized) {
+    return { ok: false, error: 'Enter a username (3 to 24 characters).' };
+  }
+  if (normalized.length < USERNAME_MIN_LENGTH) {
+    return {
+      ok: false,
+      error: `Username must be at least ${USERNAME_MIN_LENGTH} characters.`,
+    };
+  }
+  if (normalized.length > USERNAME_MAX_LENGTH) {
+    return {
+      ok: false,
+      error: `Username must be ${USERNAME_MAX_LENGTH} characters or fewer.`,
+    };
+  }
+  if (/[^a-z0-9._]/.test(normalized)) {
+    return {
+      ok: false,
+      error: 'Use only lowercase letters, numbers, periods, and underscores.',
+    };
+  }
+  if (!/^[a-z0-9]/.test(normalized) || !/[a-z0-9]$/.test(normalized)) {
+    return {
+      ok: false,
+      error: 'Start and end your username with a letter or number.',
+    };
+  }
+  if (normalized.includes('..')) {
+    return {
+      ok: false,
+      error: 'Username cannot include consecutive periods.',
+    };
+  }
+  if (RESERVED_USERNAMES.has(normalized)) {
+    return {
+      ok: false,
+      error: 'That username is reserved. Choose another.',
+    };
+  }
+  return { ok: true, username: normalized };
+}
+
+export function formatUsernameHandle(username: string | null | undefined): string | null {
+  if (!username) return null;
+  const clean = normalizeUsernameInput(username);
+  return isValidUsername(clean) ? `@${clean}` : null;
+}
+
+function foldForSearch(input: string): string {
+  return input
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+export function deriveBaseUsername(displayName: string): string {
+  const folded = foldForSearch(displayName)
+    .replace(/[^a-z0-9]+/g, '.')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^\.+|\.+$/g, '')
+    .slice(0, 18)
+    .replace(/^\.+|\.+$/g, '');
+
+  if (folded.length >= USERNAME_MIN_LENGTH && isValidUsername(folded)) {
+    return folded;
+  }
+  if (folded.length >= 1) {
+    const padded = `${folded}.reader`.slice(0, 18).replace(/^\.+|\.+$/g, '');
+    if (isValidUsername(padded)) return padded;
+  }
+  return 'reader';
+}
+
+export function buildDirectorySearchPrefixes(
+  displayName: string,
+  username: string | null
+): string[] {
+  const seen = new Set<string>();
+
+  const addPrefixesForToken = (token: string, minPrefix = 2) => {
+    const clean = token.trim().slice(0, 32);
+    if (!clean) return;
+    const startLen = Math.min(clean.length, minPrefix);
+    for (let len = startLen; len <= clean.length; len++) {
+      if (seen.size >= MAX_SEARCH_PREFIXES) return;
+      seen.add(clean.slice(0, len));
+    }
+  };
+
+  const lowerName = displayName.trim().toLowerCase();
+  const foldedName = foldForSearch(displayName.trim());
+
+  const words = [
+    ...lowerName.split(/[\s\-_/.,'’]+/).filter(Boolean),
+    ...foldedName.split(/[\s\-_/.,'’]+/).filter(Boolean),
+  ].slice(0, 8);
+
+  for (const word of words) {
+    addPrefixesForToken(word, 2);
+  }
+
+  if (lowerName.length >= 2) {
+    addPrefixesForToken(lowerName, 2);
+  }
+  if (foldedName.length >= 2 && foldedName !== lowerName) {
+    addPrefixesForToken(foldedName, 2);
+  }
+
+  if (username) {
+    const cleanHandle = normalizeUsernameInput(username);
+    addPrefixesForToken(cleanHandle, 2);
+    for (const seg of cleanHandle.split(/[._]+/).filter(Boolean)) {
+      addPrefixesForToken(seg, 2);
     }
   }
-  let out = '';
-  for (let i = 0; i < 8; i++) {
-    out += FRIEND_CODE_ALPHABET[bytes[i] % FRIEND_CODE_ALPHABET.length];
-  }
-  return out;
+
+  return [...seen].slice(0, MAX_SEARCH_PREFIXES);
 }
 
-export function isValidFriendCode(code: string): boolean {
-  return FRIEND_CODE_REGEX.test(code);
+export function normalizeReaderSearchQuery(raw: string): {
+  rawTrimmed: string;
+  isHandleOnly: boolean;
+  cleanQuery: string;
+  tokens: string[];
+} {
+  const rawTrimmed = raw.trim();
+  const isHandleOnly = rawTrimmed.startsWith('@');
+  const cleanQuery = rawTrimmed.replace(/^@+/, '').toLowerCase();
+  const tokens = cleanQuery.split(/\s+/).filter(Boolean);
+  return { rawTrimmed, isHandleOnly, cleanQuery, tokens };
 }
 
-/**
- * Normalizes a pasted friend code or invite URL (e.g., `K7M4-P9Q2`, `SELAH-K7M4-P9Q2`,
- * or `https://.../?addFriend=K7M4-P9Q2`) into an uppercase 8-character code, or `null` if invalid.
- */
-export function normalizeFriendCode(raw: string): string | null {
-  let candidate = raw.trim();
-  if (!candidate) return null;
+export function matchesDirectoryQuery(
+  entry: Pick<ReaderDirectoryEntry, 'displayName' | 'username'>,
+  rawQuery: string
+): boolean {
+  const { isHandleOnly, cleanQuery, tokens } = normalizeReaderSearchQuery(rawQuery);
+  if (!cleanQuery) return true;
 
-  const queryMatch = candidate.match(/[?&]addFriend=([^&#\s]+)/i);
-  if (queryMatch?.[1]) {
-    try {
-      candidate = decodeURIComponent(queryMatch[1]);
-    } catch {
-      candidate = queryMatch[1];
-    }
+  const username = entry.username ? entry.username.toLowerCase() : '';
+  if (isHandleOnly) {
+    return Boolean(username && username.includes(cleanQuery));
   }
 
-  candidate = candidate.toUpperCase().replace(/^SELAH[-_\s]*/i, '');
-  candidate = candidate.replace(/[\s-]+/g, '');
-
-  return FRIEND_CODE_REGEX.test(candidate) ? candidate : null;
+  const nameLower = entry.displayName.toLowerCase();
+  const nameFolded = foldForSearch(entry.displayName);
+  const combined = `${nameLower} ${nameFolded} ${username}`;
+  return tokens.every((token) => {
+    const foldedTok = foldForSearch(token);
+    return combined.includes(token) || combined.includes(foldedTok);
+  });
 }
 
-export function formatFriendCode(code: string): string {
-  const clean = code.trim().toUpperCase().replace(/[\s-]+/g, '');
-  if (clean.length === 8) {
-    return `${clean.slice(0, 4)}-${clean.slice(4)}`;
+export function rankDirectoryMatch(
+  entry: Pick<ReaderDirectoryEntry, 'displayName' | 'username'>,
+  rawQuery: string
+): number {
+  const { isHandleOnly, cleanQuery } = normalizeReaderSearchQuery(rawQuery);
+  const foldedQuery = foldForSearch(cleanQuery);
+  const username = entry.username ? entry.username.toLowerCase() : '';
+  const nameLower = entry.displayName.trim().toLowerCase();
+  const nameFolded = foldForSearch(entry.displayName.trim());
+
+  if (username && username === cleanQuery) return 0;
+  if (!isHandleOnly && (nameLower === cleanQuery || nameFolded === foldedQuery)) return 1;
+  if (username && username.startsWith(cleanQuery)) return 2;
+  if (!isHandleOnly && (nameLower.startsWith(cleanQuery) || nameFolded.startsWith(foldedQuery))) {
+    return 3;
   }
-  return clean;
+
+  const nameWords = [...nameLower.split(/[\s\-_/.,'’]+/), ...nameFolded.split(/[\s\-_/.,'’]+/)];
+  const handleSegs = username ? username.split(/[._]+/) : [];
+  if (
+    handleSegs.some((s) => s.startsWith(cleanQuery)) ||
+    (!isHandleOnly && nameWords.some((w) => w.startsWith(cleanQuery) || w.startsWith(foldedQuery)))
+  ) {
+    return 4;
+  }
+  return 5;
 }
 
 export function getOrderedUsersPair(uidA: string, uidB: string): [string, string] {
@@ -239,52 +408,28 @@ export function buildFriendProfileStats(params: {
 export function getFriendCounterpart(
   friendship: FriendshipRecord,
   myUid: string
-): { uid: string; displayName: string; photoURL: string | null } {
+): { uid: string; displayName: string; username: string | null; photoURL: string | null } {
   const isRequester = friendship.requesterUid === myUid;
+  const rawUsername = isRequester ? friendship.recipientUsername : friendship.requesterUsername;
   return {
     uid: isRequester ? friendship.recipientUid : friendship.requesterUid,
     displayName: isRequester ? friendship.recipientName : friendship.requesterName,
+    username: isValidUsername(rawUsername) ? rawUsername : null,
     photoURL: isRequester ? friendship.recipientPhotoURL : friendship.requesterPhotoURL,
   };
 }
 
-export function buildFriendInviteUrl(code: string): string {
-  const formatted = formatFriendCode(code);
-  const configuredBase = import.meta.env?.VITE_PUBLIC_APP_URL;
-  if (typeof configuredBase === 'string' && /^https?:\/\//i.test(configuredBase)) {
-    const base = configuredBase.replace(/\/+$/, '');
-    return `${base}/?addFriend=${encodeURIComponent(formatted)}`;
-  }
-  if (
-    !isNativePlatform() &&
-    typeof window !== 'undefined' &&
-    /^https?:$/i.test(window.location.protocol)
-  ) {
-    const cleanPath = window.location.pathname || '/';
-    return `${window.location.origin}${cleanPath}?addFriend=${encodeURIComponent(formatted)}`;
-  }
-  return `https://inchbrayock.github.io/Selah/?addFriend=${encodeURIComponent(formatted)}`;
-}
-
-export function extractInviteCodeFromLocation(search: string): string | null {
-  if (!search) return null;
-  try {
-    const params = new URLSearchParams(search);
-    const raw = params.get('addFriend');
-    return raw ? normalizeFriendCode(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function computeFriendStatsSignature(profile: Pick<
-  FriendProfile,
-  'displayName' | 'photoURL' | 'friendCode' | 'sharingEnabled' | 'privacy' | 'stats'
->): string {
+export function computeFriendStatsSignature(
+  profile: Pick<
+    FriendProfile,
+    'displayName' | 'photoURL' | 'username' | 'discoverable' | 'sharingEnabled' | 'privacy' | 'stats'
+  >
+): string {
   return JSON.stringify({
     displayName: profile.displayName,
     photoURL: profile.photoURL,
-    friendCode: profile.friendCode,
+    username: profile.username,
+    discoverable: profile.discoverable,
     sharingEnabled: profile.sharingEnabled,
     privacy: profile.privacy,
     stats: profile.stats,

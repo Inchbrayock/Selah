@@ -1,14 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { motion } from 'motion/react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowLeft,
+  AtSign,
   Check,
   CloudOff,
-  Copy,
-  RefreshCw,
+  Edit3,
   Search,
-  Share2,
   Shield,
+  UserCheck,
   UserPlus,
   Users,
   X,
@@ -16,14 +16,21 @@ import {
 import { BOOKS_BY_ID, TOTAL_CANON_CHAPTERS } from '../../data/bibleCanon';
 import { formatPlainDate } from '../../lib/dates';
 import {
-  buildFriendInviteUrl,
-  formatFriendCode,
-  normalizeFriendCode,
+  formatUsernameHandle,
+  matchesDirectoryQuery,
+  normalizeUsernameInput,
+  rankDirectoryMatch,
+  sanitizeFriendPrivacy,
+  validateUsername,
 } from '../../lib/friends';
-import { SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
-import { isNativePlatform } from '../../lib/nativeShell';
+import { FOLIO_EASE, SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
 import { useBibleStore } from '../../store/useBibleStore';
-import type { FriendCodeLookup, FriendConnection } from '../../types/bible';
+import type {
+  FriendConnection,
+  FriendRequestTarget,
+  FriendshipRecord,
+  ReaderDirectoryEntry,
+} from '../../types/bible';
 import { InlineDeleteConfirm } from '../ui/InlineDeleteConfirm';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
 import { SanctuaryLamp } from '../ui/SanctuaryLamp';
@@ -40,38 +47,14 @@ interface FriendsViewProps {
 
 type CircleSort = 'recent' | 'name' | 'progress';
 
+interface DiscoveryPerson extends ReaderDirectoryEntry {
+  contextNote?: string | null;
+}
+
 function formatPercent(read: number, total: number): string {
   if (total <= 0) return '0%';
   const pct = (read / total) * 100;
   return `${pct.toFixed(pct > 0 && pct < 10 ? 1 : 0)}%`;
-}
-
-async function copyTextToClipboard(text: string): Promise<boolean> {
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      // Fallback below
-    }
-  }
-  if (typeof document !== 'undefined') {
-    try {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      textarea.setAttribute('readonly', '');
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(textarea);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-  return false;
 }
 
 export const FriendsView: React.FC<FriendsViewProps> = ({
@@ -83,38 +66,60 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     firebaseAvailable,
     user,
     syncStatus,
+    preferences,
     ownFriendProfile,
     friends,
     incomingRequests,
     outgoingRequests,
+    blockedUids,
+    sharedPlans,
     friendsLoading,
     friendsError,
     friendsFromCache,
-    pendingInviteCode,
-    clearPendingInviteCode,
     ensureFriendProfileReady,
-    lookupFriendByCode,
+    searchReaders,
+    loadSuggestedReaders,
+    checkUsernameAvailability,
+    updateUsername,
     sendFriendRequest,
     acceptFriendRequest,
     declineFriendRequest,
     cancelFriendRequest,
     blockFriend,
-    regenerateFriendCode,
   } = useBibleStore();
 
   const [privacyOpen, setPrivacyOpen] = useState(false);
-  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
-  const [codeInput, setCodeInput] = useState('');
-  const [lookupResult, setLookupResult] = useState<FriendCodeLookup | null>(null);
-  const [lookupBusy, setLookupBusy] = useState(false);
+  const [editingHandle, setEditingHandle] = useState(false);
+  const [handleDraft, setHandleDraft] = useState('');
+  const [handleCheck, setHandleCheck] = useState<{
+    checking: boolean;
+    available: boolean | null;
+    message: string | null;
+  }>({ checking: false, available: null, message: null });
+  const [handleSaving, setHandleSaving] = useState(false);
+  const [handleStatus, setHandleStatus] = useState<string | null>(null);
+
+  const [peopleQuery, setPeopleQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<ReaderDirectoryEntry[]>([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchCompletedQuery, setSearchCompletedQuery] = useState('');
+  const [suggestedReaders, setSuggestedReaders] = useState<ReaderDirectoryEntry[]>([]);
+  const [suggestionsBusy, setSuggestionsBusy] = useState(false);
+
   const [requestBusyId, setRequestBusyId] = useState<string | null>(null);
   const [blockConfirmPairId, setBlockConfirmPairId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
-  const [codeStatus, setCodeStatus] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+
+  const [circleFilter, setCircleFilter] = useState('');
   const [sortBy, setSortBy] = useState<CircleSort>('recent');
   const [selectedFriendUid, setSelectedFriendUid] = useState<string | null>(null);
+
+  const searchTokenRef = useRef(0);
+  const handleCheckTokenRef = useRef(0);
+
+  const ownPrivacy = sanitizeFriendPrivacy(preferences.friendPrivacy);
+  const ownHandle = formatUsernameHandle(ownFriendProfile?.username);
 
   useEffect(() => {
     if (user && !ownFriendProfile) {
@@ -122,43 +127,231 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     }
   }, [ensureFriendProfileReady, ownFriendProfile, user]);
 
-  const runCodeLookup = useCallback(
-    async (raw: string) => {
+  // Load suggested discoverable readers when signed in or circle memberships change
+  const refreshSuggestions = useCallback(async () => {
+    if (!user) {
+      setSuggestedReaders([]);
+      return;
+    }
+    setSuggestionsBusy(true);
+    try {
+      const list = await loadSuggestedReaders();
+      setSuggestedReaders(list);
+    } catch {
+      // Non-blocking suggestion load
+    } finally {
+      setSuggestionsBusy(false);
+    }
+  }, [loadSuggestedReaders, user]);
+
+  useEffect(() => {
+    if (!user) {
+      setSuggestedReaders([]);
+      return;
+    }
+    void refreshSuggestions();
+  }, [
+    user,
+    friends.length,
+    incomingRequests.length,
+    outgoingRequests.length,
+    blockedUids.length,
+    refreshSuggestions,
+  ]);
+
+  // Live debounced search for readers by name or @username
+  const executeSearch = useCallback(
+    async (rawQuery: string) => {
+      const trimmed = rawQuery.trim();
+      const token = ++searchTokenRef.current;
+      if (!trimmed || !user) {
+        setSearchResults([]);
+        setSearchCompletedQuery('');
+        setSearchBusy(false);
+        return;
+      }
+      setSearchBusy(true);
       setActionError(null);
-      setActionStatus(null);
-      setLookupResult(null);
-      setLookupBusy(true);
       try {
-        const result = await lookupFriendByCode(raw);
-        if (!result) {
-          const formatted = normalizeFriendCode(raw);
-          setActionError(
-            formatted
-              ? `No reader matched code ${formatFriendCode(formatted)}. Check the letters and try again.`
-              : 'No reader matched that code.'
-          );
-          return;
-        }
-        setLookupResult(result);
+        const matches = await searchReaders(trimmed);
+        if (searchTokenRef.current !== token) return;
+        setSearchResults(matches);
+        setSearchCompletedQuery(trimmed);
       } catch (err) {
+        if (searchTokenRef.current !== token) return;
         setActionError(
-          err instanceof Error ? err.message : 'Could not look up that friend code.'
+          err instanceof Error ? err.message : 'Could not search readers right now.'
         );
       } finally {
-        setLookupBusy(false);
+        if (searchTokenRef.current === token) {
+          setSearchBusy(false);
+        }
       }
     },
-    [lookupFriendByCode]
+    [searchReaders, user]
   );
 
-  // Consume deep-linked invite code automatically once signed in
   useEffect(() => {
-    if (!user || !pendingInviteCode) return;
-    const formatted = formatFriendCode(pendingInviteCode);
-    setCodeInput(formatted);
-    clearPendingInviteCode();
-    void runCodeLookup(formatted);
-  }, [clearPendingInviteCode, pendingInviteCode, runCodeLookup, user]);
+    const trimmed = peopleQuery.trim();
+    if (!trimmed) {
+      searchTokenRef.current += 1;
+      setSearchResults([]);
+      setSearchCompletedQuery('');
+      setSearchBusy(false);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void executeSearch(trimmed);
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [executeSearch, peopleQuery]);
+
+  // Live debounced username availability check while editing handle
+  useEffect(() => {
+    if (!editingHandle) return;
+    const normalized = normalizeUsernameInput(handleDraft);
+    const current = ownFriendProfile?.username ?? '';
+    const token = ++handleCheckTokenRef.current;
+
+    if (!normalized) {
+      setHandleCheck({ checking: false, available: null, message: null });
+      return;
+    }
+    const validation = validateUsername(normalized);
+    if (!validation.ok) {
+      setHandleCheck({ checking: false, available: false, message: validation.error });
+      return;
+    }
+    if (validation.username === current) {
+      setHandleCheck({
+        checking: false,
+        available: true,
+        message: 'Your current username',
+      });
+      return;
+    }
+
+    setHandleCheck({ checking: true, available: null, message: 'Checking availability…' });
+    const timer = window.setTimeout(() => {
+      void checkUsernameAvailability(validation.username)
+        .then((res) => {
+          if (handleCheckTokenRef.current !== token) return;
+          if (res.available) {
+            setHandleCheck({
+              checking: false,
+              available: true,
+              message: `@${res.normalized} is available`,
+            });
+          } else {
+            setHandleCheck({
+              checking: false,
+              available: false,
+              message: res.error ?? `@${res.normalized} is already taken.`,
+            });
+          }
+        })
+        .catch(() => {
+          if (handleCheckTokenRef.current !== token) return;
+          setHandleCheck({ checking: false, available: null, message: null });
+        });
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [checkUsernameAvailability, editingHandle, handleDraft, ownFriendProfile?.username]);
+
+  const friendsByUid = useMemo(() => {
+    const map = new Map<string, FriendConnection>();
+    for (const conn of friends) {
+      map.set(conn.friendUid, conn);
+    }
+    return map;
+  }, [friends]);
+
+  const incomingByRequesterUid = useMemo(() => {
+    const map = new Map<string, FriendshipRecord>();
+    for (const req of incomingRequests) {
+      map.set(req.requesterUid, req);
+    }
+    return map;
+  }, [incomingRequests]);
+
+  const outgoingByRecipientUid = useMemo(() => {
+    const map = new Map<string, FriendshipRecord>();
+    for (const req of outgoingRequests) {
+      map.set(req.recipientUid, req);
+    }
+    return map;
+  }, [outgoingRequests]);
+
+  const cohortNoteByUid = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const sp of sharedPlans) {
+      for (const member of sp.members) {
+        if (user && member.uid !== user.uid && !map.has(member.uid)) {
+          map.set(member.uid, `Reading ${sp.cohort.title}`);
+        }
+      }
+    }
+    return map;
+  }, [sharedPlans, user]);
+
+  // Suggestions combine co-readers from shared plans first, then discoverable directory readers
+  const peopleSuggestions = useMemo<DiscoveryPerson[]>(() => {
+    if (!user) return [];
+    const blockedSet = new Set(blockedUids);
+    const seen = new Set<string>([user.uid]);
+    const combined: DiscoveryPerson[] = [];
+
+    for (const sp of sharedPlans) {
+      for (const member of sp.members) {
+        if (
+          seen.has(member.uid) ||
+          blockedSet.has(member.uid) ||
+          friendsByUid.has(member.uid) ||
+          incomingByRequesterUid.has(member.uid) ||
+          outgoingByRecipientUid.has(member.uid)
+        ) {
+          continue;
+        }
+        seen.add(member.uid);
+        combined.push({
+          uid: member.uid,
+          displayName: member.displayName,
+          username: null,
+          photoURL: member.photoURL,
+          contextNote: `Reading ${sp.cohort.title}`,
+        });
+      }
+    }
+
+    for (const entry of suggestedReaders) {
+      if (
+        seen.has(entry.uid) ||
+        blockedSet.has(entry.uid) ||
+        friendsByUid.has(entry.uid) ||
+        incomingByRequesterUid.has(entry.uid) ||
+        outgoingByRecipientUid.has(entry.uid)
+      ) {
+        continue;
+      }
+      seen.add(entry.uid);
+      combined.push({
+        ...entry,
+        contextNote: cohortNoteByUid.get(entry.uid) ?? null,
+      });
+    }
+
+    return combined.slice(0, 8);
+  }, [
+    blockedUids,
+    cohortNoteByUid,
+    friendsByUid,
+    incomingByRequesterUid,
+    outgoingByRecipientUid,
+    sharedPlans,
+    suggestedReaders,
+    user,
+  ]);
 
   const selectedConnection = useMemo(
     () => friends.find((f) => f.friendUid === selectedFriendUid) ?? null,
@@ -166,15 +359,17 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
   );
 
   const visibleFriends = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = circleFilter.trim().toLowerCase().replace(/^@+/, '');
     const filtered = q
       ? friends.filter((conn) => {
           const planTitle = conn.profile?.stats.activePlanTitle?.toLowerCase() ?? '';
           const bookName = conn.profile?.stats.lastReadBookId
             ? BOOKS_BY_ID[conn.profile.stats.lastReadBookId]?.name.toLowerCase() ?? ''
             : '';
+          const username = conn.username?.toLowerCase() ?? '';
           return (
             conn.displayName.toLowerCase().includes(q) ||
+            username.includes(q) ||
             planTitle.includes(q) ||
             bookName.includes(q)
           );
@@ -186,104 +381,152 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
         return a.displayName.localeCompare(b.displayName);
       }
       if (sortBy === 'progress') {
-        const aCh = a.profile?.sharingEnabled && a.profile.privacy.showBookProgress
-          ? a.profile.stats.totalChaptersRead
-          : -1;
-        const bCh = b.profile?.sharingEnabled && b.profile.privacy.showBookProgress
-          ? b.profile.stats.totalChaptersRead
-          : -1;
+        const aCh =
+          a.profile?.sharingEnabled && a.profile.privacy.showBookProgress
+            ? a.profile.stats.totalChaptersRead
+            : -1;
+        const bCh =
+          b.profile?.sharingEnabled && b.profile.privacy.showBookProgress
+            ? b.profile.stats.totalChaptersRead
+            : -1;
         return bCh - aCh || a.displayName.localeCompare(b.displayName);
       }
-      const aDate = a.profile?.sharingEnabled && a.profile.privacy.showRecentBook
-        ? a.profile.stats.lastReadDate ?? ''
-        : '';
-      const bDate = b.profile?.sharingEnabled && b.profile.privacy.showRecentBook
-        ? b.profile.stats.lastReadDate ?? ''
-        : '';
+      const aDate =
+        a.profile?.sharingEnabled && a.profile.privacy.showRecentBook
+          ? a.profile.stats.lastReadDate ?? ''
+          : '';
+      const bDate =
+        b.profile?.sharingEnabled && b.profile.privacy.showRecentBook
+          ? b.profile.stats.lastReadDate ?? ''
+          : '';
       return bDate.localeCompare(aDate) || a.displayName.localeCompare(b.displayName);
     });
-  }, [friends, searchQuery, sortBy]);
+  }, [circleFilter, friends, sortBy]);
 
   const hasPendingRequests = incomingRequests.length > 0 || outgoingRequests.length > 0;
-  const formattedOwnCode = ownFriendProfile ? formatFriendCode(ownFriendProfile.friendCode) : '';
+  const trimmedPeopleQuery = peopleQuery.trim();
+  const isSearching = trimmedPeopleQuery.length > 0;
 
-  const handleCopyOwnCode = async () => {
-    if (!formattedOwnCode) return;
-    const copied = await copyTextToClipboard(formattedOwnCode);
-    setCodeStatus(copied ? `Copied ${formattedOwnCode}` : 'Copy unavailable on this browser.');
-    window.setTimeout(() => setCodeStatus(null), 2600);
-  };
+  const displayedSearchResults = useMemo<DiscoveryPerson[]>(() => {
+    if (!trimmedPeopleQuery || !user) return [];
+    const blockedSet = new Set(blockedUids);
+    const byUid = new Map<string, DiscoveryPerson>();
 
-  const handleShareInvite = async () => {
-    if (!ownFriendProfile) return;
-    const inviteUrl = buildFriendInviteUrl(ownFriendProfile.friendCode);
-    const shareTitle = 'Join my Reading Circle on Selah';
-    const shareText = `Read Scripture alongside me on Selah. My friend code is ${formattedOwnCode}.`;
+    for (const entry of searchResults) {
+      if (entry.uid === user.uid || blockedSet.has(entry.uid)) continue;
+      byUid.set(entry.uid, {
+        ...entry,
+        contextNote: cohortNoteByUid.get(entry.uid) ?? null,
+      });
+    }
 
-    if (isNativePlatform()) {
-      try {
-        const { Share } = await import('@capacitor/share');
-        await Share.share({
-          title: shareTitle,
-          text: shareText,
-          url: inviteUrl,
-          dialogTitle: 'Share Reading Circle invite',
-        });
+    const addLocalCandidate = (candidate: ReaderDirectoryEntry) => {
+      if (candidate.uid === user.uid || blockedSet.has(candidate.uid)) return;
+      if (!matchesDirectoryQuery(candidate, trimmedPeopleQuery)) return;
+      const existing = byUid.get(candidate.uid);
+      if (existing) {
+        if (!existing.username && candidate.username) {
+          byUid.set(candidate.uid, { ...existing, username: candidate.username });
+        }
         return;
-      } catch (err) {
-        if (err instanceof Error && /cancel/i.test(err.message)) return;
       }
+      byUid.set(candidate.uid, {
+        ...candidate,
+        contextNote: cohortNoteByUid.get(candidate.uid) ?? null,
+      });
+    };
+
+    for (const conn of friends) {
+      addLocalCandidate({
+        uid: conn.friendUid,
+        displayName: conn.displayName,
+        username: conn.username,
+        photoURL: conn.photoURL,
+      });
+    }
+    for (const req of incomingRequests) {
+      addLocalCandidate({
+        uid: req.requesterUid,
+        displayName: req.requesterName,
+        username: req.requesterUsername ?? null,
+        photoURL: req.requesterPhotoURL,
+      });
+    }
+    for (const req of outgoingRequests) {
+      addLocalCandidate({
+        uid: req.recipientUid,
+        displayName: req.recipientName,
+        username: req.recipientUsername ?? null,
+        photoURL: req.recipientPhotoURL,
+      });
     }
 
-    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-      try {
-        await navigator.share({
-          title: shareTitle,
-          text: shareText,
-          url: inviteUrl,
-        });
-        return;
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') return;
-      }
-    }
+    return [...byUid.values()].sort((a, b) => {
+      const rankDiff =
+        rankDirectoryMatch(a, trimmedPeopleQuery) - rankDirectoryMatch(b, trimmedPeopleQuery);
+      if (rankDiff !== 0) return rankDiff;
+      return a.displayName.localeCompare(b.displayName);
+    });
+  }, [
+    blockedUids,
+    cohortNoteByUid,
+    friends,
+    incomingRequests,
+    outgoingRequests,
+    searchResults,
+    trimmedPeopleQuery,
+    user,
+  ]);
 
-    const copied = await copyTextToClipboard(inviteUrl);
-    setCodeStatus(copied ? 'Invite link copied' : 'Copy unavailable on this browser.');
-    window.setTimeout(() => setCodeStatus(null), 2600);
+  const handleOpenEditHandle = () => {
+    setHandleDraft(ownFriendProfile?.username ?? '');
+    setHandleStatus(null);
+    setActionError(null);
+    setEditingHandle((prev) => !prev);
   };
 
-  const handleRegenerateCode = async () => {
-    setConfirmRegenerate(false);
-    setCodeStatus(null);
-    try {
-      await regenerateFriendCode();
-      setCodeStatus('New friend code ready');
-      window.setTimeout(() => setCodeStatus(null), 2600);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Could not refresh friend code.');
-    }
-  };
-
-  const handleLookupSubmit = (e: React.FormEvent) => {
+  const handleSaveHandle = async (e: React.FormEvent) => {
     e.preventDefault();
-    void runCodeLookup(codeInput);
+    if (handleSaving) return;
+    const validation = validateUsername(handleDraft);
+    if (!validation.ok) {
+      setHandleCheck({ checking: false, available: false, message: validation.error });
+      return;
+    }
+    setHandleSaving(true);
+    setActionError(null);
+    try {
+      await updateUsername(validation.username);
+      setEditingHandle(false);
+      setHandleStatus(`Username saved as @${validation.username}`);
+      window.setTimeout(() => setHandleStatus(null), 3000);
+    } catch (err) {
+      setHandleCheck({
+        checking: false,
+        available: false,
+        message: err instanceof Error ? err.message : 'Could not save username.',
+      });
+    } finally {
+      setHandleSaving(false);
+    }
   };
 
-  const handleSendRequest = async () => {
-    if (!lookupResult) return;
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void executeSearch(peopleQuery);
+  };
+
+  const handleAddFriend = async (target: FriendRequestTarget) => {
     setActionError(null);
     setActionStatus(null);
-    setRequestBusyId(`send:${lookupResult.uid}`);
+    setRequestBusyId(`send:${target.uid}`);
     try {
-      const outcome = await sendFriendRequest(lookupResult);
+      const outcome = await sendFriendRequest(target);
       setActionStatus(
         outcome === 'accepted'
-          ? `Added ${lookupResult.displayName} to your circle.`
-          : `Request sent to ${lookupResult.displayName}.`
+          ? `Added ${target.displayName} to your circle.`
+          : `Friend request sent to ${target.displayName}.`
       );
-      setLookupResult(null);
-      setCodeInput('');
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Could not send friend request.');
     } finally {
@@ -318,12 +561,14 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     }
   };
 
-  const handleCancelOutgoing = async (pairId: string) => {
+  const handleCancelOutgoing = async (pairId: string, recipientName?: string) => {
     setActionError(null);
     setRequestBusyId(pairId);
     try {
       await cancelFriendRequest(pairId);
-      setActionStatus('Request cancelled.');
+      setActionStatus(
+        recipientName ? `Cancelled request to ${recipientName}.` : 'Request cancelled.'
+      );
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Could not cancel request.');
     } finally {
@@ -371,6 +616,119 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     return 'Connected in your circle';
   };
 
+  const renderDirectoryRow = (person: DiscoveryPerson) => {
+    const existingFriend = friendsByUid.get(person.uid);
+    const incomingReq = incomingByRequesterUid.get(person.uid);
+    const outgoingReq = outgoingByRecipientUid.get(person.uid);
+    const handle = formatUsernameHandle(person.username);
+    const isSendBusy = requestBusyId === `send:${person.uid}`;
+    const isIncomingBusy = incomingReq ? requestBusyId === incomingReq.id : false;
+    const isOutgoingBusy = outgoingReq ? requestBusyId === outgoingReq.id : false;
+
+    const subLine = incomingReq
+      ? 'Sent you a friend request'
+      : person.contextNote || (existingFriend ? 'In your Reading Circle' : null);
+
+    return (
+      <li
+        key={person.uid}
+        className="flex flex-col justify-between gap-3 p-3.5 sm:flex-row sm:items-center"
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <ProfileAvatar
+            user={{
+              displayName: person.displayName,
+              email: null,
+              photoURL: person.photoURL,
+            }}
+            sizeClassName="h-10 w-10"
+            textClassName="text-sm"
+          />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+                {person.displayName}
+              </p>
+              {handle && (
+                <span className="truncate text-xs text-[var(--text-secondary)]">{handle}</span>
+              )}
+            </div>
+            {subLine && (
+              <p className="mt-0.5 truncate text-xs text-[var(--text-secondary)]">{subLine}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap items-center gap-2 pl-[3.25rem] sm:pl-0">
+          {existingFriend ? (
+            <button
+              type="button"
+              onClick={() => setSelectedFriendUid(person.uid)}
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:border-[var(--border-strong)]"
+            >
+              <UserCheck className="h-3.5 w-3.5 text-[var(--color-sage)]" aria-hidden="true" />
+              <span>Friends</span>
+            </button>
+          ) : incomingReq ? (
+            <>
+              <button
+                type="button"
+                disabled={isIncomingBusy}
+                onClick={() => void handleAccept(incomingReq.id, incomingReq.requesterName)}
+                className="btn-primary min-h-9 rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-60"
+              >
+                Accept
+              </button>
+              <button
+                type="button"
+                disabled={isIncomingBusy}
+                onClick={() => void handleDecline(incomingReq.id)}
+                className="min-h-9 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] disabled:opacity-60"
+              >
+                Decline
+              </button>
+            </>
+          ) : outgoingReq ? (
+            <div className="flex items-center gap-1.5">
+              <span className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)]">
+                <Check className="h-3.5 w-3.5 text-[var(--color-sage)]" aria-hidden="true" />
+                <span>Requested</span>
+              </span>
+              <button
+                type="button"
+                disabled={isOutgoingBusy}
+                onClick={() => void handleCancelOutgoing(outgoingReq.id, person.displayName)}
+                aria-label={`Cancel friend request to ${person.displayName}`}
+                className="min-h-9 rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--color-crimson)] disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <motion.button
+              type="button"
+              whileTap={TACTILE_TAP}
+              transition={SPRING_TACTILE}
+              disabled={isSendBusy}
+              onClick={() =>
+                void handleAddFriend({
+                  uid: person.uid,
+                  displayName: person.displayName,
+                  username: person.username,
+                  photoURL: person.photoURL,
+                })
+              }
+              className="btn-primary inline-flex min-h-9 items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs font-medium disabled:opacity-60"
+            >
+              <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>{isSendBusy ? 'Sending…' : 'Add friend'}</span>
+            </motion.button>
+          )}
+        </div>
+      </li>
+    );
+  };
+
   return (
     <div className="space-y-6 sm:space-y-8">
       {/* Page Header */}
@@ -390,65 +748,32 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
               Reading Circle
             </h1>
             <p className="mt-1 text-sm leading-relaxed text-[var(--text-secondary)]">
-              Share your reading rhythm quietly with friends you trust. Study notes and reflections
-              stay private on your own ledger.
+              Find friends by name or @username to follow each other’s reading rhythm. Study notes
+              and reflections stay private on your own ledger.
             </p>
           </div>
 
           {firebaseAvailable && user && (
             <div className="flex flex-wrap items-center gap-2">
-              {formattedOwnCode ? (
-                <div className="inline-flex min-h-10 items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-1.5">
-                  <span className="text-xs text-[var(--text-secondary)]">Your code</span>
-                  <span className="font-mono text-sm font-semibold tracking-wider text-[var(--text-primary)] tabular-nums">
-                    {formattedOwnCode}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void handleCopyOwnCode()}
-                    aria-label="Copy friend code"
-                    className="inline-flex h-7 w-7 items-center justify-center rounded text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)]"
-                  >
-                    <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                </div>
+              {ownFriendProfile ? (
+                <button
+                  type="button"
+                  aria-expanded={editingHandle}
+                  onClick={handleOpenEditHandle}
+                  className={`inline-flex min-h-10 items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    editingHandle
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                      : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:border-[var(--border-strong)]'
+                  }`}
+                >
+                  <AtSign className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
+                  <span>{ownHandle ?? 'Choose username'}</span>
+                  <Edit3 className="h-3 w-3 text-[var(--text-secondary)]" aria-hidden="true" />
+                </button>
               ) : (
                 <span className="inline-flex min-h-10 items-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 text-xs text-[var(--text-secondary)]">
-                  Preparing your friend code…
+                  Preparing your @username…
                 </span>
-              )}
-
-              {ownFriendProfile && (
-                <>
-                  <motion.button
-                    type="button"
-                    whileTap={TACTILE_TAP}
-                    transition={SPRING_TACTILE}
-                    onClick={() => void handleShareInvite()}
-                    className="btn-primary inline-flex min-h-10 items-center gap-1.5 rounded-md px-3.5 py-2 text-xs font-medium transition-opacity hover:opacity-90"
-                  >
-                    <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span>Share invite link</span>
-                  </motion.button>
-
-                  {confirmRegenerate ? (
-                    <InlineDeleteConfirm
-                      confirmLabel="Replace code"
-                      onCancel={() => setConfirmRegenerate(false)}
-                      onConfirm={() => void handleRegenerateCode()}
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmRegenerate(true)}
-                      title="Generate a new friend code and retire the old one"
-                      className="inline-flex min-h-10 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                      <span>New code</span>
-                    </button>
-                  )}
-                </>
               )}
 
               <button
@@ -468,13 +793,99 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
           )}
         </div>
 
-        {codeStatus && (
+        {/* Inline Username Editor */}
+        <AnimatePresence initial={false}>
+          {firebaseAvailable && user && editingHandle && (
+            <motion.form
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2, ease: FOLIO_EASE }}
+              onSubmit={(e) => void handleSaveHandle(e)}
+              className="mt-4 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4"
+            >
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+                <div className="flex-1 space-y-1.5">
+                  <label
+                    htmlFor="username-handle-input"
+                    className="block text-xs font-medium text-[var(--text-primary)]"
+                  >
+                    Your @username
+                  </label>
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Choose a handle (3–24 letters, numbers, periods, or underscores) so friends can
+                    find you easily.
+                  </p>
+                  <div className="relative mt-1.5 flex items-center">
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute left-3 text-sm text-[var(--text-secondary)]"
+                    >
+                      @
+                    </span>
+                    <input
+                      id="username-handle-input"
+                      type="text"
+                      value={handleDraft}
+                      onChange={(e) => setHandleDraft(normalizeUsernameInput(e.target.value))}
+                      maxLength={24}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      placeholder="hannah.miller"
+                      className="folio-input min-h-10 w-full py-1.5 pl-7 pr-3 text-base sm:max-w-sm sm:text-sm"
+                    />
+                  </div>
+                  {handleCheck.message && (
+                    <p
+                      role="status"
+                      className={`text-xs font-medium ${
+                        handleCheck.available === true
+                          ? 'text-[var(--color-sage)]'
+                          : handleCheck.available === false
+                            ? 'text-[var(--color-crimson)]'
+                            : 'text-[var(--text-secondary)]'
+                      }`}
+                    >
+                      {handleCheck.message}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={handleSaving}
+                    onClick={() => setEditingHandle(false)}
+                    className="min-h-9 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={
+                      handleSaving ||
+                      handleCheck.checking ||
+                      handleCheck.available === false ||
+                      !normalizeUsernameInput(handleDraft)
+                    }
+                    className="btn-primary min-h-9 rounded-md px-3.5 py-1.5 text-xs font-medium disabled:opacity-55"
+                  >
+                    {handleSaving ? 'Saving…' : 'Save username'}
+                  </button>
+                </div>
+              </div>
+            </motion.form>
+          )}
+        </AnimatePresence>
+
+        {handleStatus && (
           <p
             role="status"
             className="mt-2.5 inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-sage)]"
           >
             <Check className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>{codeStatus}</span>
+            <span>{handleStatus}</span>
           </p>
         )}
       </section>
@@ -488,7 +899,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
             <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
               Reading Circle uses Firebase authentication and cloud sync to connect friends. Configure
               your Firebase environment keys in <code className="font-mono">.env.local</code> to
-              enable accounts and friend codes.
+              enable accounts and friend search.
             </p>
           </div>
         </section>
@@ -500,14 +911,11 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                 <Users className="h-5 w-5 text-[var(--color-accent)]" aria-hidden="true" />
               </div>
               <h2 className="font-display text-2xl font-medium text-[var(--text-primary)]">
-                {pendingInviteCode
-                  ? `Sign in to open invite ${formatFriendCode(pendingInviteCode)}`
-                  : 'Sign in to read alongside friends'}
+                Sign in to read alongside friends
               </h2>
               <p className="text-sm leading-relaxed text-[var(--text-secondary)]">
-                {pendingInviteCode
-                  ? 'Once you sign in or create a free Sanctuary account, your existing local chapters stay intact and this invite code will load automatically.'
-                  : 'Create a free Sanctuary account to receive a shareable friend code, exchange invitations, and follow each other’s progress across the 66 books.'}
+                Create a free Sanctuary account to claim a @username, find friends by name, exchange
+                requests, and follow each other’s progress across the 66 books.
               </p>
             </div>
 
@@ -530,8 +938,8 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
             <div className="flex items-center gap-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--color-lamp-soft)] px-4 py-2.5 text-xs text-[var(--text-primary)]">
               <CloudOff className="h-4 w-4 shrink-0 text-[var(--color-lamp)]" aria-hidden="true" />
               <span>
-                Offline — showing your last synced Reading Circle snapshot. Friend requests will
-                resume once reconnected.
+                Offline — showing your last synced Reading Circle snapshot. Friend searches and
+                requests will resume once reconnected.
               </span>
             </div>
           )}
@@ -547,12 +955,12 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
 
           <EncouragementSlipsPanel />
 
-          {/* Add a Friend + Pending Requests */}
+          {/* Find Friends + Pending Requests */}
           <div className="grid gap-6 lg:grid-cols-12 lg:items-start">
             <section
               aria-labelledby="add-friend-heading"
               className={`folio-sheet p-4 sm:p-6 ${
-                hasPendingRequests ? 'lg:col-span-5' : 'lg:col-span-12'
+                hasPendingRequests ? 'lg:col-span-7' : 'lg:col-span-12'
               }`}
             >
               <div className="max-w-[60ch]">
@@ -560,83 +968,42 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                   id="add-friend-heading"
                   className="font-display text-xl font-medium text-[var(--text-primary)]"
                 >
-                  Add a friend
+                  Find friends
                 </h2>
                 <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
-                  Enter an 8-character friend code or paste a friend’s invite link.
+                  Search by a reader’s name or @username to send a friend request.
                 </p>
               </div>
 
-              <form onSubmit={handleLookupSubmit} className="mt-4 flex flex-col gap-2.5 sm:flex-row">
-                <input
-                  type="text"
-                  value={codeInput}
-                  onChange={(e) => {
-                    setCodeInput(e.target.value);
-                    if (actionError) setActionError(null);
-                  }}
-                  aria-label="Friend code or invite link"
-                  placeholder="K7M4-P9Q2 or invite link"
-                  className="folio-input min-h-11 flex-1 px-3 py-2 text-base placeholder:text-[var(--text-secondary)] sm:min-h-10 sm:text-sm"
-                />
-                <motion.button
-                  type="submit"
-                  whileTap={TACTILE_TAP}
-                  transition={SPRING_TACTILE}
-                  disabled={lookupBusy || !codeInput.trim()}
-                  className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-subtle)] disabled:opacity-55 sm:min-h-10"
-                >
-                  <Search className="h-4 w-4" aria-hidden="true" />
-                  <span>{lookupBusy ? 'Looking up…' : 'Look up'}</span>
-                </motion.button>
-              </form>
-
-              {lookupResult && (
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] p-3.5">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <ProfileAvatar
-                      user={{
-                        displayName: lookupResult.displayName,
-                        email: null,
-                        photoURL: null,
-                      }}
-                      sizeClassName="h-9 w-9"
-                      textClassName="text-xs"
-                    />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-[var(--text-primary)]">
-                        {lookupResult.displayName}
-                      </p>
-                      <p className="font-mono text-xs text-[var(--text-secondary)]">
-                        {formatFriendCode(lookupResult.code)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
+              <form onSubmit={handleSearchSubmit} className="mt-4">
+                <div className="relative flex items-center">
+                  <Search
+                    className="pointer-events-none absolute left-3.5 h-4 w-4 text-[var(--text-secondary)]"
+                    aria-hidden="true"
+                  />
+                  <input
+                    type="search"
+                    value={peopleQuery}
+                    onChange={(e) => {
+                      setPeopleQuery(e.target.value);
+                      if (actionError) setActionError(null);
+                    }}
+                    aria-label="Search people by name or @username"
+                    placeholder="Search by name or @username…"
+                    className="folio-input min-h-11 w-full py-2 pl-10 pr-10 text-base placeholder:text-[var(--text-secondary)] sm:min-h-10 sm:text-sm [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none"
+                  />
+                  {peopleQuery && (
                     <button
                       type="button"
-                      onClick={() => setLookupResult(null)}
-                      aria-label="Dismiss lookup result"
-                      className="inline-flex min-h-9 items-center rounded-md border border-[var(--border-subtle)] px-2.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      onClick={() => setPeopleQuery('')}
+                      aria-label="Clear search"
+                      className="absolute right-2 inline-flex h-8 w-8 items-center justify-center rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                     >
-                      <X className="h-3.5 w-3.5" aria-hidden="true" />
+                      <X className="h-4 w-4" aria-hidden="true" />
                     </button>
-                    <button
-                      type="button"
-                      disabled={requestBusyId === `send:${lookupResult.uid}`}
-                      onClick={() => void handleSendRequest()}
-                      className="btn-primary inline-flex min-h-9 items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs font-medium disabled:opacity-60"
-                    >
-                      <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
-                      <span>
-                        {requestBusyId === `send:${lookupResult.uid}`
-                          ? 'Sending…'
-                          : 'Send request'}
-                      </span>
-                    </button>
-                  </div>
+                  )}
                 </div>
-              )}
+              </form>
 
               {actionError && (
                 <p role="alert" className="mt-3 text-xs font-medium text-[var(--color-crimson)]">
@@ -652,18 +1019,70 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                   <span>{actionStatus}</span>
                 </p>
               )}
+
+              {/* Live Search Results */}
+              {isSearching ? (
+                <div className="mt-4">
+                  {searchBusy && displayedSearchResults.length === 0 ? (
+                    <p className="py-3 text-xs text-[var(--text-secondary)]">
+                      Searching readers…
+                    </p>
+                  ) : displayedSearchResults.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
+                        <span>
+                          Results for “{searchCompletedQuery || trimmedPeopleQuery}”
+                        </span>
+                        {searchBusy && <span>Updating…</span>}
+                      </div>
+                      <ul className="divide-y divide-[var(--border-subtle)] rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)]">
+                        {displayedSearchResults.map(renderDirectoryRow)}
+                      </ul>
+                    </div>
+                  ) : !searchBusy && searchCompletedQuery === trimmedPeopleQuery ? (
+                    <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-4 text-xs leading-relaxed text-[var(--text-secondary)]">
+                      No readers matched “{trimmedPeopleQuery}”. Check the spelling or try their
+                      full name or @username.
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                /* People You May Know / Suggested Readers */
+                <div className="mt-4 space-y-2.5">
+                  {!ownPrivacy.discoverable && (
+                    <p className="text-xs text-[var(--text-secondary)]">
+                      Your profile is currently hidden from people search in Privacy settings.
+                    </p>
+                  )}
+
+                  {suggestionsBusy && peopleSuggestions.length === 0 ? (
+                    <p className="py-2 text-xs text-[var(--text-secondary)]">
+                      Looking for people you may know…
+                    </p>
+                  ) : peopleSuggestions.length > 0 ? (
+                    <>
+                      <p className="text-xs font-medium text-[var(--text-secondary)]">
+                        People you may know
+                      </p>
+                      <ul className="divide-y divide-[var(--border-subtle)] rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)]">
+                        {peopleSuggestions.map(renderDirectoryRow)}
+                      </ul>
+                    </>
+                  ) : null}
+                </div>
+              )}
             </section>
 
             {hasPendingRequests && (
               <section
                 aria-labelledby="friend-requests-heading"
-                className="folio-sheet p-4 sm:p-6 lg:col-span-7"
+                className="folio-sheet p-4 sm:p-6 lg:col-span-5"
               >
                 <h2
                   id="friend-requests-heading"
                   className="font-display text-xl font-medium text-[var(--text-primary)]"
                 >
-                  Pending requests
+                  Friend requests
                 </h2>
 
                 <div className="mt-3 space-y-4">
@@ -675,10 +1094,11 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                       <ul className="divide-y divide-[var(--border-subtle)] rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)]">
                         {incomingRequests.map((req) => {
                           const busy = requestBusyId === req.id;
+                          const reqHandle = formatUsernameHandle(req.requesterUsername);
                           return (
                             <li
                               key={req.id}
-                              className="flex flex-col justify-between gap-3 p-3.5 sm:flex-row sm:items-center"
+                              className="flex flex-col justify-between gap-3 p-3.5"
                             >
                               <div className="flex min-w-0 items-center gap-3">
                                 <ProfileAvatar
@@ -691,9 +1111,16 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                                   textClassName="text-xs"
                                 />
                                 <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">
-                                    {req.requesterName}
-                                  </p>
+                                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                    <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+                                      {req.requesterName}
+                                    </p>
+                                    {reqHandle && (
+                                      <span className="truncate text-xs text-[var(--text-secondary)]">
+                                        {reqHandle}
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="text-xs text-[var(--text-secondary)]">
                                     Wants to join your Reading Circle
                                   </p>
@@ -753,40 +1180,50 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                         Sent ({outgoingRequests.length})
                       </p>
                       <ul className="divide-y divide-[var(--border-subtle)] rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)]">
-                        {outgoingRequests.map((req) => (
-                          <li
-                            key={req.id}
-                            className="flex flex-wrap items-center justify-between gap-3 p-3.5"
-                          >
-                            <div className="flex min-w-0 items-center gap-3">
-                              <ProfileAvatar
-                                user={{
-                                  displayName: req.recipientName,
-                                  email: null,
-                                  photoURL: req.recipientPhotoURL,
-                                }}
-                                sizeClassName="h-9 w-9"
-                                textClassName="text-xs"
-                              />
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-medium text-[var(--text-primary)]">
-                                  {req.recipientName}
-                                </p>
-                                <p className="text-xs text-[var(--text-secondary)]">
-                                  Waiting for response
-                                </p>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              disabled={requestBusyId === req.id}
-                              onClick={() => void handleCancelOutgoing(req.id)}
-                              className="min-h-9 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:border-[var(--color-crimson)] hover:text-[var(--color-crimson)] disabled:opacity-60"
+                        {outgoingRequests.map((req) => {
+                          const recHandle = formatUsernameHandle(req.recipientUsername);
+                          return (
+                            <li
+                              key={req.id}
+                              className="flex flex-wrap items-center justify-between gap-3 p-3.5"
                             >
-                              Cancel request
-                            </button>
-                          </li>
-                        ))}
+                              <div className="flex min-w-0 items-center gap-3">
+                                <ProfileAvatar
+                                  user={{
+                                    displayName: req.recipientName,
+                                    email: null,
+                                    photoURL: req.recipientPhotoURL,
+                                  }}
+                                  sizeClassName="h-9 w-9"
+                                  textClassName="text-xs"
+                                />
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                    <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+                                      {req.recipientName}
+                                    </p>
+                                    {recHandle && (
+                                      <span className="truncate text-xs text-[var(--text-secondary)]">
+                                        {recHandle}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-[var(--text-secondary)]">
+                                    Waiting for response
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                disabled={requestBusyId === req.id}
+                                onClick={() => void handleCancelOutgoing(req.id, req.recipientName)}
+                                className="min-h-9 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:border-[var(--color-crimson)] hover:text-[var(--color-crimson)] disabled:opacity-60"
+                              >
+                                Cancel request
+                              </button>
+                            </li>
+                          );
+                        })}
                       </ul>
                     </div>
                   )}
@@ -814,13 +1251,13 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
 
               {friends.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2">
-                  {(friends.length > 3 || searchQuery) && (
+                  {(friends.length > 3 || circleFilter) && (
                     <input
                       type="search"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      value={circleFilter}
+                      onChange={(e) => setCircleFilter(e.target.value)}
                       aria-label="Filter friends"
-                      placeholder="Filter by name or book…"
+                      placeholder="Filter by name, @handle, or book…"
                       className="folio-input min-h-9 px-3 py-1.5 text-sm placeholder:text-[var(--text-secondary)]"
                     />
                   )}
@@ -847,18 +1284,18 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
             ) : friends.length === 0 ? (
               <div className="py-8">
                 <p className="max-w-[55ch] text-sm leading-relaxed text-[var(--text-secondary)]">
-                  Share your friend code or paste someone else’s code above to begin reading
-                  together. Select any friend once connected to inspect their 66-book progress.
+                  Search for friends by name or @username above to send a request. Once connected,
+                  select any friend to inspect their 66-book progress.
                 </p>
               </div>
             ) : visibleFriends.length === 0 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 py-8">
                 <p className="text-sm text-[var(--text-secondary)]">
-                  No friends matched “{searchQuery}”.
+                  No friends matched “{circleFilter}”.
                 </p>
                 <button
                   type="button"
-                  onClick={() => setSearchQuery('')}
+                  onClick={() => setCircleFilter('')}
                   className="text-xs font-medium text-[var(--color-accent)] hover:underline"
                 >
                   Clear filter
@@ -873,6 +1310,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                   const showStreak = Boolean(sharing && profile?.privacy.showStreak);
                   const lampActive = Boolean(showStreak && (profile?.stats.currentStreak ?? 0) > 0);
                   const totalRead = profile?.stats.totalChaptersRead ?? 0;
+                  const connHandle = formatUsernameHandle(conn.username);
 
                   return (
                     <li key={conn.friendUid}>
@@ -895,9 +1333,16 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                               interactive
                             />
                             <div className="min-w-0">
-                              <p className="truncate font-display text-lg font-medium text-[var(--text-primary)] group-hover:text-[var(--color-accent)]">
-                                {conn.displayName}
-                              </p>
+                              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                <p className="truncate font-display text-lg font-medium text-[var(--text-primary)] group-hover:text-[var(--color-accent)]">
+                                  {conn.displayName}
+                                </p>
+                                {connHandle && (
+                                  <span className="truncate text-xs text-[var(--text-secondary)]">
+                                    {connHandle}
+                                  </span>
+                                )}
+                              </div>
                               <p className="truncate text-xs text-[var(--text-secondary)]">
                                 {renderFriendContextLine(conn)}
                               </p>

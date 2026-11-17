@@ -1,11 +1,11 @@
 import React from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Search } from 'lucide-react';
 import { sanitizeFriendPrivacy } from '../../lib/friends';
 import { useBibleStore } from '../../store/useBibleStore';
 import type { FriendPrivacySettings } from '../../types/bible';
 
 const GRANULAR_TOGGLES: {
-  key: Exclude<keyof FriendPrivacySettings, 'sharingEnabled'>;
+  key: Exclude<keyof FriendPrivacySettings, 'sharingEnabled' | 'discoverable'>;
   label: string;
   detail: string;
 }[] = [
@@ -68,8 +68,8 @@ export const FriendPrivacyPanel: React.FC = () => {
             Circle privacy
           </h2>
           <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
-            Choose what friends in your Reading Circle can view. Personal study notes, reflection
-            entries, and your email address are never shared.
+            Choose whether readers can find you in search and what accepted friends can view.
+            Personal study notes, reflection entries, and your email address are never shared.
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">
@@ -87,22 +87,42 @@ export const FriendPrivacyPanel: React.FC = () => {
         </span>
       </div>
 
-      <label className="flex cursor-pointer items-start justify-between gap-4 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] p-3.5">
-        <div>
-          <span className="block text-sm font-medium text-[var(--text-primary)]">
-            Share reading summary with accepted friends
-          </span>
-          <span className="mt-0.5 block text-xs text-[var(--text-secondary)]">
-            Turn off at any time to pause sharing without removing anyone from your circle.
-          </span>
-        </div>
-        <input
-          type="checkbox"
-          checked={privacy.sharingEnabled}
-          onChange={(e) => toggleSetting('sharingEnabled', e.target.checked)}
-          className="mt-1 h-4 w-4 shrink-0"
-        />
-      </label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="flex cursor-pointer items-start justify-between gap-4 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] p-3.5">
+          <div>
+            <span className="flex items-center gap-1.5 text-sm font-medium text-[var(--text-primary)]">
+              <Search className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
+              <span>Appear in people search</span>
+            </span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-[var(--text-secondary)]">
+              Allow other readers to find your name and @username to send you a friend request.
+            </span>
+          </div>
+          <input
+            type="checkbox"
+            checked={privacy.discoverable}
+            onChange={(e) => toggleSetting('discoverable', e.target.checked)}
+            className="mt-1 h-4 w-4 shrink-0"
+          />
+        </label>
+
+        <label className="flex cursor-pointer items-start justify-between gap-4 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] p-3.5">
+          <div>
+            <span className="block text-sm font-medium text-[var(--text-primary)]">
+              Share reading summary with accepted friends
+            </span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-[var(--text-secondary)]">
+              Turn off at any time to pause sharing without removing anyone from your circle.
+            </span>
+          </div>
+          <input
+            type="checkbox"
+            checked={privacy.sharingEnabled}
+            onChange={(e) => toggleSetting('sharingEnabled', e.target.checked)}
+            className="mt-1 h-4 w-4 shrink-0"
+          />
+        </label>
+      </div>
 
       <div className={`grid gap-2.5 sm:grid-cols-2 ${!privacy.sharingEnabled ? 'opacity-55' : ''}`}>
         {GRANULAR_TOGGLES.map((item) => (

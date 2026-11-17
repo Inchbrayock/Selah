@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Award, BookOpen, Compass, ShieldBan, UserMinus, X } from 'lucide-react';
 import { BOOKS_BY_ID, OT_TOTAL_CHAPTERS, NT_TOTAL_CHAPTERS, TOTAL_CANON_CHAPTERS } from '../../data/bibleCanon';
 import { formatPlainDate } from '../../lib/dates';
+import { formatUsernameHandle } from '../../lib/friends';
 import { useBibleStore } from '../../store/useBibleStore';
 import type { FriendConnection } from '../../types/bible';
 import { InlineDeleteConfirm } from '../ui/InlineDeleteConfirm';
@@ -104,12 +105,19 @@ export const FriendFolioDialog: React.FC<FriendFolioDialogProps> = ({
                 textClassName="text-base"
               />
               <div className="min-w-0">
-                <h2
-                  id="friend-folio-title"
-                  className="truncate font-display text-xl font-medium text-[var(--text-primary)] sm:text-2xl"
-                >
-                  {connection.displayName}
-                </h2>
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <h2
+                    id="friend-folio-title"
+                    className="truncate font-display text-xl font-medium text-[var(--text-primary)] sm:text-2xl"
+                  >
+                    {connection.displayName}
+                  </h2>
+                  {formatUsernameHandle(connection.username) && (
+                    <span className="text-xs text-[var(--text-secondary)]">
+                      {formatUsernameHandle(connection.username)}
+                    </span>
+                  )}
+                </div>
                 <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
                   {!profile
                     ? 'Loading reading summary…'
