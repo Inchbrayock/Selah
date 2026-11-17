@@ -937,4 +937,53 @@ describe('Firebase Account & Cloud Sync', () => {
       globalThis.Image = origImage;
     }
   }, 15000);
+
+  it('tracks cloud sync status across user, logs, and custom plan snapshot metadata transitions', async () => {
+    const baseUserDoc = {
+      displayName: 'Hannah',
+      preferences: { ...DEFAULT_PREFERENCES },
+      colorScheme: 'system' as ColorSchemePreference,
+    };
+    mockState.userDocs.set('email-uid-1', baseUserDoc);
+
+    render(<App />);
+    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+
+    await act(async () => {
+      mockState.setCurrentUser({
+        uid: 'email-uid-1',
+        email: 'hannah@selah.app',
+        displayName: 'Hannah',
+        photoURL: null,
+        emailVerified: true,
+        providerIds: ['password'],
+      });
+    });
+
+    const accountBtn = await screen.findByRole('button', {
+      name: /Open account and cloud sync/i,
+    });
+    fireEvent.click(accountBtn);
+    expect(await screen.findByText(/Synced to cloud/i)).toBeInTheDocument();
+
+    const subs = [...(mockState.cloudSubscribers.get('email-uid-1') ?? [])];
+    expect(subs.length).toBeGreaterThan(0);
+
+    // Logs from cache keeps sync status offline even if user doc already reported synced
+    await act(async () => {
+      for (const sub of subs) {
+        sub.onLogs([], true);
+        sub.onUserDoc(baseUserDoc, false);
+      }
+    });
+    expect(await screen.findByText(/Offline — saved locally/i)).toBeInTheDocument();
+
+    // Once logs confirm from server too, sync status returns to Synced to cloud
+    await act(async () => {
+      for (const sub of subs) {
+        sub.onLogs([], false);
+      }
+    });
+    expect(await screen.findByText(/Synced to cloud/i)).toBeInTheDocument();
+  }, 15000);
 });

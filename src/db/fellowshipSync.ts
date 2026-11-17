@@ -511,6 +511,7 @@ export function subscribeSharedPlans(
 
   return onSnapshot(
     cohortsQuery,
+    { includeMetadataChanges: true },
     (snap) => {
       const next: SharedPlanCohort[] = [];
       snap.forEach((docSnap) => {

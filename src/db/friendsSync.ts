@@ -496,6 +496,7 @@ export function subscribeFriendships(
 
   return onSnapshot(
     friendshipsQuery,
+    { includeMetadataChanges: true },
     (snap) => {
       const next: FriendshipRecord[] = [];
       snap.forEach((docSnap) => {

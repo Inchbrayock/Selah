@@ -452,6 +452,13 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const sharedPlansUnsubRef = useRef<(() => void) | null>(null);
   const sharedMemberUnsubsRef = useRef<Map<string, () => void>>(new Map());
   const encouragementsUnsubRef = useRef<(() => void) | null>(null);
+  const friendshipsSnapshotReceivedRef = useRef(false);
+  const sharedPlansSnapshotReceivedRef = useRef(false);
+  const encouragementsSnapshotReceivedRef = useRef(false);
+  const friendshipsListenerErroredRef = useRef(false);
+  const cloudListenerErroredRef = useRef(false);
+  const attachCloudListenersRef = useRef<((uid: string, sessionToken: number) => void) | null>(null);
+  const attachFriendListenersRef = useRef<((uid: string, sessionToken: number) => void) | null>(null);
   const cohortProgressTimerRef = useRef<number | null>(null);
   const lastPublishedCohortProgressSigRef = useRef<string | null>(null);
   const pendingWritesRef = useRef(0);
@@ -544,9 +551,18 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handleOnline = () => {
-      if (userRef.current && pendingWritesRef.current === 0) {
+      const activeUser = userRef.current;
+      if (activeUser && pendingWritesRef.current === 0) {
         setSyncStatus('synced');
         setSyncError(null);
+      }
+      if (activeUser) {
+        if (cloudListenerErroredRef.current) {
+          attachCloudListenersRef.current?.(activeUser.uid, authSessionTokenRef.current);
+        }
+        if (friendshipsListenerErroredRef.current) {
+          attachFriendListenersRef.current?.(activeUser.uid, authSessionTokenRef.current);
+        }
       }
     };
     const handleOffline = () => {
@@ -802,11 +818,14 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const attachFriendListeners = useCallback(
     (uid: string, sessionToken: number) => {
       detachFriendListeners();
+      friendshipsListenerErroredRef.current = false;
       setFriendsLoading(true);
       setFriendsError(null);
       friendshipsUnsubRef.current = subscribeFriendships(uid, {
         onFriendships: (records, fromCache) => {
           if (authSessionTokenRef.current !== sessionToken) return;
+          friendshipsSnapshotReceivedRef.current = true;
+          friendshipsListenerErroredRef.current = false;
           friendshipsRef.current = records;
           setFriendships(records);
           setFriendsLoading(false);
@@ -822,6 +841,7 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         },
         onError: (err) => {
           if (authSessionTokenRef.current !== sessionToken) return;
+          friendshipsListenerErroredRef.current = true;
           setFriendsLoading(false);
           setFriendsError(formatCloudError(err));
         },
@@ -830,6 +850,7 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       sharedPlansUnsubRef.current = subscribeSharedPlans(uid, {
         onCohorts: (cohorts) => {
           if (authSessionTokenRef.current !== sessionToken) return;
+          sharedPlansSnapshotReceivedRef.current = true;
           sharedCohortsRef.current = cohorts;
           setSharedCohorts(cohorts);
           syncSharedMemberSubscriptions(uid, cohorts, sessionToken);
@@ -856,6 +877,7 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         uid,
         (items) => {
           if (authSessionTokenRef.current !== sessionToken) return;
+          encouragementsSnapshotReceivedRef.current = true;
           receivedEncouragementsRef.current = items;
           setReceivedEncouragements(items);
           persistCurrentFriendCache(
@@ -882,9 +904,27 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const attachCloudListeners = useCallback(
     (uid: string, sessionToken: number) => {
       cloudUnsubRef.current?.();
+      cloudListenerErroredRef.current = false;
+      const channelFromCache = {
+        user: false,
+        logs: false,
+        customPlans: false,
+      };
+      const applyCloudChannelSyncStatus = () => {
+        if (pendingWritesRef.current !== 0) return;
+        const anyFromCache =
+          channelFromCache.user || channelFromCache.logs || channelFromCache.customPlans;
+        setSyncStatus(anyFromCache ? 'offline' : 'synced');
+        if (!anyFromCache) {
+          setLastSyncedAt(new Date().toISOString());
+        }
+      };
+
       cloudUnsubRef.current = subscribeCloudSanctuary(uid, {
         onUserDoc: (docState, fromCache) => {
           if (authSessionTokenRef.current !== sessionToken) return;
+          cloudListenerErroredRef.current = false;
+          channelFromCache.user = fromCache;
           if (
             pendingPrefsWritesRef.current === 0 &&
             !arePreferencesEqual(prefsRef.current, docState.preferences)
@@ -902,13 +942,12 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               prev ? { ...prev, displayName: docState.displayName || null } : prev
             );
           }
-          if (pendingWritesRef.current === 0) {
-            setSyncStatus(fromCache ? 'offline' : 'synced');
-            if (!fromCache) setLastSyncedAt(new Date().toISOString());
-          }
+          applyCloudChannelSyncStatus();
         },
         onLogs: (nextCloudLogs, fromCache) => {
           if (authSessionTokenRef.current !== sessionToken) return;
+          cloudListenerErroredRef.current = false;
+          channelFromCache.logs = fromCache;
           if (
             pendingLogWritesRef.current === 0 &&
             normalizeLogsSignature(logsRef.current) !== normalizeLogsSignature(nextCloudLogs)
@@ -916,13 +955,12 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             hydrateSilently(nextCloudLogs, prefsRef.current);
             void replaceAllLogs(nextCloudLogs);
           }
-          if (pendingWritesRef.current === 0) {
-            setSyncStatus(fromCache ? 'offline' : 'synced');
-            if (!fromCache) setLastSyncedAt(new Date().toISOString());
-          }
+          applyCloudChannelSyncStatus();
         },
         onCustomPlans: (nextCloudPlans, fromCache) => {
           if (authSessionTokenRef.current !== sessionToken) return;
+          cloudListenerErroredRef.current = false;
+          channelFromCache.customPlans = fromCache;
           if (
             pendingCustomPlanWritesRef.current === 0 &&
             normalizeCustomPlansSignature(customPlansRef.current) !==
@@ -932,13 +970,11 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             setCustomPlans(nextCloudPlans);
             void replaceAllCustomPlans(nextCloudPlans);
           }
-          if (pendingWritesRef.current === 0) {
-            setSyncStatus(fromCache ? 'offline' : 'synced');
-            if (!fromCache) setLastSyncedAt(new Date().toISOString());
-          }
+          applyCloudChannelSyncStatus();
         },
         onError: (err) => {
           if (authSessionTokenRef.current !== sessionToken) return;
+          cloudListenerErroredRef.current = true;
           setSyncStatus('error');
           setSyncError(formatCloudError(err));
         },
@@ -946,6 +982,9 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     },
     [hydrateSilently]
   );
+
+  attachCloudListenersRef.current = attachCloudListeners;
+  attachFriendListenersRef.current = attachFriendListeners;
 
   useEffect(() => {
     if (!firebaseAvailable) {
@@ -966,6 +1005,11 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           cloudUnsubRef.current?.();
           cloudUnsubRef.current = null;
           detachFriendListeners();
+          friendshipsSnapshotReceivedRef.current = false;
+          sharedPlansSnapshotReceivedRef.current = false;
+          encouragementsSnapshotReceivedRef.current = false;
+          friendshipsListenerErroredRef.current = false;
+          cloudListenerErroredRef.current = false;
           lastPublishedFriendSigRef.current = null;
           pendingWritesRef.current = 0;
           pendingPrefsWritesRef.current = 0;
@@ -1007,6 +1051,12 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
 
         const resolvedUser = resolveEffectiveAccountUser(nextUser) ?? nextUser;
+        friendshipsSnapshotReceivedRef.current = false;
+        sharedPlansSnapshotReceivedRef.current = false;
+        encouragementsSnapshotReceivedRef.current = false;
+        friendshipsListenerErroredRef.current = false;
+        cloudListenerErroredRef.current = false;
+        setFriendsFromCache(false);
         setUser(resolvedUser);
         userRef.current = resolvedUser;
         setAuthLoading(false);
@@ -1019,12 +1069,17 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             ownFriendProfileRef.current = cached.ownProfile;
             setOwnFriendProfile(cached.ownProfile);
           }
-          if (friendshipsRef.current.length === 0 && cached.friendships.length > 0) {
+          if (
+            !friendshipsSnapshotReceivedRef.current &&
+            friendshipsRef.current.length === 0 &&
+            cached.friendships.length > 0
+          ) {
             friendshipsRef.current = cached.friendships;
             setFriendships(cached.friendships);
             setFriendsFromCache(true);
           }
           if (
+            !friendshipsSnapshotReceivedRef.current &&
             Object.keys(friendProfilesRef.current).length === 0 &&
             Object.keys(cached.profilesByUid).length > 0
           ) {
@@ -1032,6 +1087,7 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             setFriendProfilesByUid(cached.profilesByUid);
           }
           if (
+            !sharedPlansSnapshotReceivedRef.current &&
             sharedCohortsRef.current.length === 0 &&
             cached.sharedPlans &&
             cached.sharedPlans.length > 0
@@ -1047,6 +1103,7 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             setSharedMembersByCohort(cachedMembers);
           }
           if (
+            !encouragementsSnapshotReceivedRef.current &&
             receivedEncouragementsRef.current.length === 0 &&
             cached.encouragements &&
             cached.encouragements.length > 0
@@ -1787,6 +1844,11 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     cloudUnsubRef.current?.();
     cloudUnsubRef.current = null;
     detachFriendListeners();
+    friendshipsSnapshotReceivedRef.current = false;
+    sharedPlansSnapshotReceivedRef.current = false;
+    encouragementsSnapshotReceivedRef.current = false;
+    friendshipsListenerErroredRef.current = false;
+    cloudListenerErroredRef.current = false;
     lastPublishedFriendSigRef.current = null;
     pendingWritesRef.current = 0;
     pendingPrefsWritesRef.current = 0;
@@ -1938,13 +2000,19 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       setSyncStatus('synced');
       setLastSyncedAt(new Date().toISOString());
+      if (cloudListenerErroredRef.current) {
+        attachCloudListeners(activeUser.uid, authSessionTokenRef.current);
+      }
+      if (friendshipsListenerErroredRef.current) {
+        attachFriendListeners(activeUser.uid, authSessionTokenRef.current);
+      }
       setAnnouncement('Sanctuary synced with your cloud account.');
     } catch (err) {
       const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
       setSyncStatus(offline ? 'offline' : 'error');
       setSyncError(formatCloudError(err));
     }
-  }, [hydrateSilently]);
+  }, [attachCloudListeners, attachFriendListeners, hydrateSilently]);
 
   const ensureFriendProfileReady = useCallback(async () => {
     const activeUser = userRef.current;

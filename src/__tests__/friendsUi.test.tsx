@@ -35,7 +35,9 @@ const cloudMocks = vi.hoisted(() => ({
 
 const friendsSyncState = vi.hoisted(() => ({
   onFriendshipsCb: null as ((records: FriendshipRecord[], fromCache: boolean) => void) | null,
+  onFriendshipsErrCb: null as ((err: Error) => void) | null,
   profileCallbacks: new Map<string, (profile: FriendProfile | null) => void>(),
+  loadFriendCacheImpl: null as ((uid: string) => Promise<unknown>) | null,
 }));
 
 const friendsMocks = vi.hoisted(() => ({
@@ -107,9 +109,11 @@ vi.mock('../db/friendsSync', () => ({
   ) => {
     friendsMocks.subscribeFriendships(uid, handlers);
     friendsSyncState.onFriendshipsCb = handlers.onFriendships;
+    friendsSyncState.onFriendshipsErrCb = handlers.onError;
     handlers.onFriendships([], false);
     return () => {
       friendsSyncState.onFriendshipsCb = null;
+      friendsSyncState.onFriendshipsErrCb = null;
     };
   },
   subscribeFriendProfile: (
@@ -124,6 +128,17 @@ vi.mock('../db/friendsSync', () => ({
     };
   },
 }));
+
+vi.mock('../db/repository', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../db/repository')>();
+  return {
+    ...actual,
+    loadFriendCache: (uid: string) =>
+      friendsSyncState.loadFriendCacheImpl
+        ? friendsSyncState.loadFriendCacheImpl(uid)
+        : actual.loadFriendCache(uid),
+  };
+});
 
 import App from '../App';
 import { MiniCanonicalSpine } from '../components/friends/MiniCanonicalSpine';
@@ -199,7 +214,9 @@ describe('Reading Circle UI and workflows', () => {
     window.history.replaceState(null, '', '/');
     authState.currentUser = null;
     friendsSyncState.onFriendshipsCb = null;
+    friendsSyncState.onFriendshipsErrCb = null;
     friendsSyncState.profileCallbacks.clear();
+    friendsSyncState.loadFriendCacheImpl = null;
 
     cloudMocks.ensureCloudUserDoc.mockImplementation(
       async (user: AccountUser, defaults: { preferences: UserPreferences; colorScheme: string }) => ({
@@ -499,5 +516,99 @@ describe('Reading Circle UI and workflows', () => {
 
     fireEvent.mouseEnter(johnBtn);
     expect(screen.getByText('John: 10 of 21 chapters')).toBeInTheDocument();
+  });
+
+  it('clears the offline snapshot banner when friendships transition from cache to synced and ignores stale late friend cache loads', async () => {
+    const cachedMiriam: FriendshipRecord = {
+      id: 'uid_hannah_uid_miriam',
+      users: ['uid_hannah', 'uid_miriam'],
+      requesterUid: 'uid_miriam',
+      recipientUid: 'uid_hannah',
+      requesterName: 'Miriam',
+      requesterPhotoURL: null,
+      recipientName: 'Hannah',
+      recipientPhotoURL: null,
+      status: 'accepted',
+      createdAt: '2026-03-01T10:00:00.000Z',
+      acceptedAt: '2026-03-02T10:00:00.000Z',
+      updatedAt: '2026-03-02T10:00:00.000Z',
+    };
+
+    let resolveLateCache!: (val: unknown) => void;
+    friendsSyncState.loadFriendCacheImpl = () =>
+      new Promise((resolve) => {
+        resolveLateCache = resolve;
+      });
+
+    authState.currentUser = HANNAH;
+    render(<App />);
+
+    await waitFor(() => {
+      expect(friendsMocks.subscribeFriendships).toHaveBeenCalled();
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Reading Circle' }));
+    expect(await screen.findByRole('heading', { name: 'Reading Circle' })).toBeInTheDocument();
+
+    // Even if Dexie friendCache finishes AFTER live server empty snapshot, stale cache must not overwrite or mark offline
+    await act(async () => {
+      resolveLateCache({
+        ownerUid: HANNAH.uid,
+        ownProfile: HANNAH_PROFILE,
+        friendships: [cachedMiriam],
+        profilesByUid: { uid_miriam: MIRIAM_PROFILE },
+        updatedAt: '2026-03-03T10:00:00.000Z',
+      });
+    });
+
+    expect(
+      screen.queryByText(/Offline — showing your last synced Reading Circle snapshot/i)
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('No friends connected yet')).toBeInTheDocument();
+
+    // Emit cached snapshot first -> offline banner shows
+    await act(async () => {
+      friendsSyncState.onFriendshipsCb?.([cachedMiriam], true);
+    });
+    expect(
+      await screen.findByText(/Offline — showing your last synced Reading Circle snapshot/i)
+    ).toBeInTheDocument();
+
+    // Emit server-confirmed snapshot with unchanged docs -> offline banner clears
+    await act(async () => {
+      friendsSyncState.onFriendshipsCb?.([cachedMiriam], false);
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/Offline — showing your last synced Reading Circle snapshot/i)
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('1 friend connected')).toBeInTheDocument();
+  });
+
+  it('recovers errored friendships subscription when online event fires', async () => {
+    authState.currentUser = HANNAH;
+    render(<App />);
+
+    await waitFor(() => {
+      expect(friendsMocks.subscribeFriendships).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Reading Circle' }));
+
+    await act(async () => {
+      friendsSyncState.onFriendshipsErrCb?.(new Error('Transient connection lost'));
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Transient connection lost');
+
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+
+    await waitFor(() => {
+      expect(friendsMocks.subscribeFriendships).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText('Transient connection lost')).not.toBeInTheDocument();
+    });
   });
 });

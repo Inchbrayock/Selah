@@ -220,6 +220,7 @@ export function subscribeCloudSanctuary(
 
   const unsubUser = onSnapshot(
     doc(services.db, 'users', uid),
+    { includeMetadataChanges: true },
     (snap) => {
       if (!snap.exists()) return;
       const data = snap.data();
@@ -239,6 +240,7 @@ export function subscribeCloudSanctuary(
 
   const unsubLogs = onSnapshot(
     collection(services.db, 'users', uid, 'readingLogs'),
+    { includeMetadataChanges: true },
     (snap) => {
       const next: ReadingLogEntry[] = [];
       snap.forEach((docSnap) => {
@@ -253,6 +255,7 @@ export function subscribeCloudSanctuary(
   const unsubPlans = handlers.onCustomPlans
     ? onSnapshot(
         collection(services.db, 'users', uid, 'customPlans'),
+        { includeMetadataChanges: true },
         (snap) => {
           const next: CustomPlanDefinition[] = [];
           snap.forEach((docSnap) => {
