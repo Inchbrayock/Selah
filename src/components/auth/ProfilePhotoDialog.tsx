@@ -21,7 +21,7 @@ import {
   type SanctuaryEmblemId,
 } from '../../lib/avatar';
 import { TACTILE_PILL_TAP } from '../../lib/motion';
-import { useBibleStore } from '../../store/useBibleStore';
+import { useAccountSync } from '../../store/useBibleStore';
 import { ModalDialog } from '../ui/ModalDialog';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
 import { SanctuaryEmblemArtwork } from '../ui/SanctuaryEmblemArtwork';
@@ -45,7 +45,7 @@ interface CropSession {
 const CROP_VIEWPORT_PX = 192;
 
 export const ProfilePhotoDialog: React.FC<ProfilePhotoDialogProps> = ({ open, onClose }) => {
-  const { user, updateProfilePhoto } = useBibleStore();
+  const { user, updateProfilePhoto } = useAccountSync();
   const titleId = useId();
   const descId = useId();
   const urlInputId = useId();
@@ -95,16 +95,16 @@ export const ProfilePhotoDialog: React.FC<ProfilePhotoDialogProps> = ({ open, on
   const hasChanges = Boolean(cropSession) || previewUrl !== currentEffectiveUrl;
 
   const stageLabel = useMemo(() => {
-    if (cropSession) return 'Drag photo to frame portrait';
-    if (draft.kind === 'local') return 'Device portrait · saved on this device';
-    if (activeEmblem) return `Sanctuary seal · ${activeEmblem.label}`;
+    if (cropSession) return 'Drag photo to frame your picture';
+    if (draft.kind === 'local') return 'Device photo · saved on this device only';
+    if (activeEmblem) return `Profile icon · ${activeEmblem.label}`;
     if (draft.photoURL) {
       if (providerPhotoURL && draft.photoURL === providerPhotoURL) {
-        return 'Google account portrait · syncs everywhere';
+        return 'Google profile photo · syncs everywhere';
       }
-      return 'Linked portrait · syncs everywhere';
+      return 'Linked photo · syncs everywhere';
     }
-    return 'Serif monogram · default initials';
+    return 'Default initials';
   }, [cropSession, draft, activeEmblem, providerPhotoURL]);
 
   const previewUser = useMemo(
@@ -272,14 +272,14 @@ export const ProfilePhotoDialog: React.FC<ProfilePhotoDialogProps> = ({ open, on
             Profile picture
           </h2>
           <p id={descId} className="mt-0.5 text-xs text-[var(--text-secondary)]">
-            Upload a photo from your device, choose a Sanctuary seal, or paste an image link.
+            Upload a photo from your device, pick an icon, or paste an image link.
           </p>
         </div>
         <motion.button
           type="button"
           whileTap={TACTILE_PILL_TAP}
           onClick={onClose}
-          aria-label="Close profile picture studio"
+          aria-label="Close profile picture dialog"
           className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] sm:min-h-9 sm:min-w-9"
         >
           <X className="h-4 w-4" aria-hidden="true" />
@@ -414,6 +414,12 @@ export const ProfilePhotoDialog: React.FC<ProfilePhotoDialogProps> = ({ open, on
                   {user?.displayName || 'Selah Reader'}
                 </p>
                 <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{stageLabel}</p>
+                {draft.kind === 'local' && (
+                  <p className="mt-1 text-[0.72rem] leading-snug text-[var(--color-lamp)]">
+                    Friends will see your initials or previous synced icon unless you choose a
+                    profile icon or HTTPS link.
+                  </p>
+                )}
 
                 <div className="mt-3 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
                   <button
@@ -458,14 +464,14 @@ export const ProfilePhotoDialog: React.FC<ProfilePhotoDialogProps> = ({ open, on
           )}
         </section>
 
-        {/* Curated Sanctuary Seals */}
-        <section aria-labelledby="sanctuary-seals-picker-heading">
+        {/* Curated Profile Icons */}
+        <section aria-labelledby="profile-icons-picker-heading">
           <div className="mb-2.5 flex items-baseline justify-between gap-2">
             <h3
-              id="sanctuary-seals-picker-heading"
-              className="text-xs font-medium tracking-[0.06em] text-[var(--text-secondary)] uppercase"
+              id="profile-icons-picker-heading"
+              className="text-xs font-semibold text-[var(--text-secondary)]"
             >
-              Sanctuary seals
+              Profile icons
             </h3>
             <span className="text-[0.72rem] text-[var(--text-secondary)]">
               Syncs everywhere
@@ -474,7 +480,7 @@ export const ProfilePhotoDialog: React.FC<ProfilePhotoDialogProps> = ({ open, on
 
           <div
             role="radiogroup"
-            aria-label="Sanctuary portrait seals"
+            aria-label="Profile icons"
             className="grid grid-cols-2 gap-2 sm:grid-cols-4"
           >
             {SANCTUARY_EMBLEMS.map((emblem) => {
@@ -552,7 +558,7 @@ export const ProfilePhotoDialog: React.FC<ProfilePhotoDialogProps> = ({ open, on
       {/* Footer */}
       <div className="flex flex-col-reverse gap-3 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <p className="text-[0.72rem] leading-snug text-[var(--text-secondary)]">
-          Seals and HTTPS links sync across devices and Reading Circle. Device uploads stay on this device.
+          Icons and HTTPS links sync across devices and Friends. Uploaded device photos stay on this device only.
         </p>
         <div className="flex shrink-0 items-center justify-end gap-2">
           <button
@@ -569,7 +575,7 @@ export const ProfilePhotoDialog: React.FC<ProfilePhotoDialogProps> = ({ open, on
             disabled={submitting || !hasChanges}
             className="btn-primary inline-flex min-h-10 items-center justify-center rounded-md px-4 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-9 sm:py-1.5"
           >
-            {submitting ? 'Saving…' : 'Save portrait'}
+            {submitting ? 'Saving…' : 'Save picture'}
           </button>
         </div>
       </div>

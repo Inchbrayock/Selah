@@ -46,7 +46,6 @@ export interface PlanStage {
   id: string;
   index: number;
   label: string;
-  shortLabel: string;
   startDay: number;
   endDay: number;
   days: PlanDayStatus[];
@@ -267,7 +266,7 @@ export function getPlanCoverageMeta(plan: ReadingPlan): PlanCoverageMeta {
 export function buildPlanStages(plan: ReadingPlan, dayStatuses: PlanDayStatus[]): PlanStage[] {
   if (dayStatuses.length === 0) return [];
 
-  const slices: { label: string; shortLabel: string; days: PlanDayStatus[] }[] = [];
+  const slices: { label: string; days: PlanDayStatus[] }[] = [];
 
   if (plan.durationDays <= 45) {
     for (let i = 0; i < dayStatuses.length; i += 7) {
@@ -275,7 +274,6 @@ export function buildPlanStages(plan: ReadingPlan, dayStatuses: PlanDayStatus[])
       const weekNum = Math.floor(i / 7) + 1;
       slices.push({
         label: `Week ${weekNum}`,
-        shortLabel: `Wk ${weekNum}`,
         days: chunk,
       });
     }
@@ -283,12 +281,10 @@ export function buildPlanStages(plan: ReadingPlan, dayStatuses: PlanDayStatus[])
     const chunkSize = 15;
     for (let i = 0; i < dayStatuses.length; i += chunkSize) {
       const chunk = dayStatuses.slice(i, i + chunkSize);
-      const stageNum = Math.floor(i / chunkSize) + 1;
       const start = chunk[0].day.day;
       const end = chunk[chunk.length - 1].day.day;
       slices.push({
         label: `Days ${start}–${end}`,
-        shortLabel: `Part ${stageNum}`,
         days: chunk,
       });
     }
@@ -305,7 +301,6 @@ export function buildPlanStages(plan: ReadingPlan, dayStatuses: PlanDayStatus[])
       monthIndex += 1;
       slices.push({
         label: `Month ${monthIndex}`,
-        shortLabel: `M${monthIndex}`,
         days: chunk,
       });
     }
@@ -315,7 +310,6 @@ export function buildPlanStages(plan: ReadingPlan, dayStatuses: PlanDayStatus[])
     id: `stage-${idx + 1}`,
     index: idx,
     label: slice.label,
-    shortLabel: slice.shortLabel,
     startDay: slice.days[0].day.day,
     endDay: slice.days[slice.days.length - 1].day.day,
     days: slice.days,

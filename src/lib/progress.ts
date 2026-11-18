@@ -17,7 +17,35 @@ import {
   diffCalendarDays,
   getDayOfWeek,
   todayPlainDate,
+  toUtcDayIndex,
 } from './dates';
+
+/**
+ * Formats a completion ratio as a compact percentage string (1 decimal below 10%, integer otherwise).
+ */
+export function formatPercent(read: number, total: number): string {
+  if (total <= 0) return '0%';
+  const pct = (read / total) * 100;
+  return `${pct.toFixed(pct > 0 && pct < 10 ? 1 : 0)}%`;
+}
+
+/**
+ * Picks the best default book for quick-logging: last read book if unfinished,
+ * else first in-progress book, else John.
+ */
+export function getSuggestedBookId(summary: BibleProgressSummary): string {
+  if (summary.lastReadBookId) {
+    const lastProgress = summary.bookProgressById[summary.lastReadBookId];
+    if (lastProgress && lastProgress.nextUnreadChapter !== null) {
+      return lastProgress.book.id;
+    }
+  }
+  const inProgress = BIBLE_BOOKS.find((b) => {
+    const p = summary.bookProgressById[b.id];
+    return p && p.readChapters > 0 && !p.completed;
+  });
+  return inProgress?.id ?? 'john';
+}
 
 /**
  * Formats an array of chapter numbers into compact ranges, e.g. [1,2,3,5,7,8] -> "1–3, 5, 7–8".
@@ -89,95 +117,70 @@ export function computeStreaks(
     return { currentStreak: 0, longestStreak: 0, graceUsedThisWeek: false };
   }
 
-  const dateSet = new Set(activeDates);
+  const activeDayIndices = activeDates.map(toUtcDayIndex);
+  const activeDaySet = new Set(activeDayIndices);
 
-  // Compute longest streak across all historical reading dates
-  let longestStreak = 0;
-  const startDate = activeDates[0];
-  const endDate = activeDates[activeDates.length - 1];
-  const totalSpan = diffCalendarDays(startDate, endDate);
+  // Compute longest streak in O(D) over active reading dates (no multi-year day-by-day walk)
+  let longestStreak = 1;
+  let run = 1;
+  let lastGracedDay: number | null = null;
 
-  if (!graceEnabled) {
-    let run = 0;
-    let prevDate: string | null = null;
-    for (const d of activeDates) {
-      if (prevDate && diffCalendarDays(prevDate, d) === 1) {
+  for (let i = 1; i < activeDayIndices.length; i++) {
+    const gap = activeDayIndices[i] - activeDayIndices[i - 1] - 1;
+    if (gap === 0) {
+      run += 1;
+    } else if (graceEnabled && gap === 1) {
+      const missedDay = activeDayIndices[i - 1] + 1;
+      if (lastGracedDay === null || missedDay - lastGracedDay >= 7) {
+        lastGracedDay = missedDay;
         run += 1;
       } else {
         run = 1;
       }
-      if (run > longestStreak) longestStreak = run;
-      prevDate = d;
+    } else {
+      run = 1;
     }
-  } else {
-    // Walk day-by-day across active span allowing at most 1 missed day per 7-day window
-    const missedOffsets: number[] = [];
-    let run = 0;
-    for (let offset = 0; offset <= totalSpan; offset++) {
-      const cursor = addDays(startDate, offset);
-      if (dateSet.has(cursor)) {
-        run += 1;
-      } else {
-        // Only bridge a gap if there is at least one future read after a 1-day gap
-        // and the previous missed day wasn't within the last 6 days
-        const lastMissed = missedOffsets[missedOffsets.length - 1];
-        const canGrace =
-          (lastMissed === undefined || offset - lastMissed >= 7) &&
-          dateSet.has(addDays(cursor, 1));
-        if (canGrace && run > 0) {
-          missedOffsets.push(offset);
-        } else {
-          run = 0;
-        }
-      }
-      if (run > longestStreak) longestStreak = run;
-    }
+    if (run > longestStreak) longestStreak = run;
   }
 
-  // Compute current streak walking backwards from today (or yesterday if not yet read today)
+  // Compute current streak walking backwards from today (or yesterday / rest-day grace)
+  const todayIdx = toUtcDayIndex(todayIso);
   let currentStreak = 0;
   let graceUsedThisWeek = false;
-  let cursor = todayIso;
-  const hasToday = dateSet.has(todayIso);
-  const yesterday = addDays(todayIso, -1);
-  const hasYesterday = dateSet.has(yesterday);
+  let cursor = todayIdx;
+  const hasToday = activeDaySet.has(todayIdx);
+  const hasYesterday = activeDaySet.has(todayIdx - 1);
 
   if (!hasToday && !hasYesterday) {
-    if (!graceEnabled) {
-      return { currentStreak: 0, longestStreak, graceUsedThisWeek: false };
-    }
-    const twoDaysAgo = addDays(todayIso, -2);
-    if (!dateSet.has(twoDaysAgo)) {
+    if (!graceEnabled || !activeDaySet.has(todayIdx - 2)) {
       return { currentStreak: 0, longestStreak, graceUsedThisWeek: false };
     }
     // Yesterday was missed; today isn't logged yet, treat yesterday as the grace gap
-    cursor = twoDaysAgo;
+    cursor = todayIdx - 2;
     graceUsedThisWeek = true;
   } else if (!hasToday && hasYesterday) {
-    cursor = yesterday;
+    cursor = todayIdx - 1;
   }
 
-  // Walk backward counting active reading days
-  const recentMissDays: number[] = [];
+  let lastRecentMissStep: number | null = null;
   let stepsBack = 0;
 
   while (true) {
-    if (dateSet.has(cursor)) {
+    if (activeDaySet.has(cursor)) {
       currentStreak += 1;
       stepsBack += 1;
-      cursor = addDays(cursor, -1);
+      cursor -= 1;
     } else if (graceEnabled) {
       // Allow bridging a 1-day gap if no other missed day occurred within 7 days
-      const prevMiss = recentMissDays[recentMissDays.length - 1];
-      const dayBefore = addDays(cursor, -1);
-      const withinWeeklyBudget = prevMiss === undefined || stepsBack - prevMiss >= 7;
-      if (withinWeeklyBudget && dateSet.has(dayBefore)) {
-        recentMissDays.push(stepsBack);
+      const withinWeeklyBudget =
+        lastRecentMissStep === null || stepsBack - lastRecentMissStep >= 7;
+      if (withinWeeklyBudget && activeDaySet.has(cursor - 1)) {
+        lastRecentMissStep = stepsBack;
         if (stepsBack < 7) {
           graceUsedThisWeek = true;
         }
         stepsBack += 1;
-        cursor = dayBefore;
+        cursor -= 1;
       } else {
         break;
       }

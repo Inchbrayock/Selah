@@ -312,14 +312,14 @@ describe('Firebase Account & Cloud Sync', () => {
 
   it('opens account dialog, creates an account with email/password, and signs out cleanly', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     const signInHeaderBtn = screen.getByRole('button', {
-      name: /Sign in to sync your Sanctuary account/i,
+      name: /Sign in or open account menu/i,
     });
     fireEvent.click(signInHeaderBtn);
 
-    expect(await screen.findByText(/Save Your Reading Ledger/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Sign in & sync/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: /Create account/i }));
 
@@ -333,11 +333,11 @@ describe('Firebase Account & Cloud Sync', () => {
       target: { value: 'secret123' },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Create Sanctuary account/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Create account$/i }));
 
-    expect(await screen.findByText(/Your Sanctuary Account/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /^Account$/i })).toBeInTheDocument();
     expect(screen.getByText('david@selah.app')).toBeInTheDocument();
-    expect(screen.getByText(/Synced to cloud/i)).toBeInTheDocument();
+    expect(await screen.findByText(/^Synced$/i)).toBeInTheDocument();
 
     // Update display name
     fireEvent.click(screen.getByRole('button', { name: /Edit display name/i }));
@@ -352,13 +352,13 @@ describe('Firebase Account & Cloud Sync', () => {
     // Sign out clears cached account
     fireEvent.click(screen.getByRole('button', { name: /Sign out/i }));
     await waitFor(() => {
-      expect(screen.getByText(/Save Your Reading Ledger/i)).toBeInTheDocument();
+      expect(screen.getByText(/Sign in & sync/i)).toBeInTheDocument();
     });
   }, 15000);
 
   it('automatically uploads local guest readings when signing into an empty cloud account', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Quick Log: John 1/i }));
     await waitFor(() => {
@@ -367,7 +367,7 @@ describe('Firebase Account & Cloud Sync', () => {
 
     // Sign in with Google
     fireEvent.click(
-      screen.getByRole('button', { name: /Sign in to sync your Sanctuary account/i })
+      screen.getByRole('button', { name: /Sign in or open account menu/i })
     );
     fireEvent.click(await screen.findByRole('button', { name: /Continue with Google/i }));
 
@@ -382,7 +382,7 @@ describe('Firebase Account & Cloud Sync', () => {
     expect(savedEntry.chapters).toEqual([1]);
 
     // Logging another chapter while signed in pushes to cloud
-    fireEvent.click(screen.getByRole('button', { name: /Close account dialog/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Close account menu/i }));
     fireEvent.click(screen.getByRole('button', { name: /Quick Log: John 2/i }));
 
     await waitFor(() => {
@@ -391,7 +391,7 @@ describe('Firebase Account & Cloud Sync', () => {
     });
 
     // Signing out resets local ledger so cached data isn't left behind
-    fireEvent.click(screen.getByRole('button', { name: /Open account and cloud sync/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Open profile menu/i }));
     fireEvent.click(await screen.findByRole('button', { name: /Sign out/i }));
 
     await waitFor(() => {
@@ -399,7 +399,7 @@ describe('Firebase Account & Cloud Sync', () => {
     });
   }, 15000);
 
-  it('prompts to merge local readings when signing into an existing cloud ledger', async () => {
+  it('prompts to merge local readings when signing into an existing cloud account', async () => {
     // Seed existing cloud account for email-uid-1
     mockState.userDocs.set('email-uid-1', {
       displayName: 'Hannah',
@@ -417,7 +417,7 @@ describe('Firebase Account & Cloud Sync', () => {
     mockState.cloudLogsByUid.set('email-uid-1', existingLogs);
 
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     // Log a local guest chapter
     fireEvent.click(screen.getByRole('button', { name: /Quick Log: John 1/i }));
@@ -469,7 +469,7 @@ describe('Firebase Account & Cloud Sync', () => {
     mockState.cloudLogsByUid.set('email-uid-1', existingLogs);
 
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Quick Log: John 1/i }));
     await waitFor(() => {
@@ -502,13 +502,13 @@ describe('Firebase Account & Cloud Sync', () => {
     expect(mockState.cloudLogsByUid.get('email-uid-1')?.size).toBe(1);
 
     // Open profile popover -> Settings page and toggle color scheme + preference -> syncs to cloud
-    fireEvent.click(screen.getByRole('button', { name: /Open account and cloud sync/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Open profile menu/i }));
     fireEvent.click(await screen.findByRole('button', { name: /Settings/i }));
     expect(
-      await screen.findByRole('heading', { level: 1, name: /Sanctuary Settings/i })
+      await screen.findByRole('heading', { level: 1, name: /^Settings$/i })
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Vesper Candlelight/i }));
-    fireEvent.click(screen.getByLabelText(/Sabbath grace day/i));
+    fireEvent.click(screen.getByRole('button', { name: /Dark/i }));
+    fireEvent.click(screen.getByLabelText(/Rest day grace/i));
 
     await waitFor(() => {
       expect(cloudSpies.saveCloudColorScheme).toHaveBeenCalledWith('email-uid-1', 'dark');
@@ -525,10 +525,10 @@ describe('Firebase Account & Cloud Sync', () => {
     );
 
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole('button', { name: /Sign in to sync your Sanctuary account/i })
+      screen.getByRole('button', { name: /Sign in or open account menu/i })
     );
     fireEvent.click(await screen.findByRole('button', { name: /Continue with Google/i }));
 
@@ -547,14 +547,15 @@ describe('Firebase Account & Cloud Sync', () => {
     ).toBeInTheDocument();
   }, 15000);
 
-  it('displays profile picture on the far right without a top-bar settings button and opens dedicated Settings from the popover', async () => {
+  it('displays profile picture on the far right without top-bar settings/friends buttons and opens dedicated Settings from the popover', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
-    // No standalone Settings button exists in the header before clicking the profile button
+    // No standalone Settings or Friends button exists in the header before clicking the account button
     expect(screen.queryByRole('button', { name: /Open settings|Settings/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Open Reading Circle|Friends/i })).not.toBeInTheDocument();
     const signInBtn = screen.getByRole('button', {
-      name: /Sign in to sync your Sanctuary account/i,
+      name: /Sign in or open account menu/i,
     });
     expect(signInBtn).toBeInTheDocument();
 
@@ -571,7 +572,7 @@ describe('Firebase Account & Cloud Sync', () => {
     });
 
     const accountBtn = await screen.findByRole('button', {
-      name: /Open account and cloud sync/i,
+      name: /Open profile menu/i,
     });
     expect(screen.queryByRole('button', { name: /Open settings|Settings/i })).not.toBeInTheDocument();
 
@@ -592,26 +593,27 @@ describe('Firebase Account & Cloud Sync', () => {
     expect(header?.textContent).not.toContain('Grace');
 
     // Navigate from another tab so Back button returns to that previous tab
-    fireEvent.click(screen.getByRole('button', { name: /Books & Chapters/i }));
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    fireEvent.click(within(nav).getByRole('button', { name: /^Books$/i }));
     fireEvent.click(accountBtn);
-    expect(await screen.findByTestId('account-popover')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Settings/i }));
+    const popover = await screen.findByTestId('account-popover');
+    fireEvent.click(within(popover).getByRole('button', { name: /Settings/i }));
 
     expect(
-      await screen.findByRole('heading', { level: 1, name: /Sanctuary Settings/i })
+      await screen.findByRole('heading', { level: 1, name: /^Settings$/i })
     ).toBeInTheDocument();
     expect(screen.queryByTestId('mobile-nav-pill')).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.queryByTestId('account-popover')).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Back to Books & Chapters/i }));
-    expect(await screen.findByRole('heading', { level: 1, name: /Scripture Library/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Back to Books/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: /^Books$/i })).toBeInTheDocument();
   }, 15000);
 
   it('opens the account screen anchored beneath the profile button and dismisses cleanly', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     await act(async () => {
       mockState.setCurrentUser({
@@ -625,7 +627,7 @@ describe('Firebase Account & Cloud Sync', () => {
     });
 
     const profileBtn = await screen.findByRole('button', {
-      name: /Open account and cloud sync/i,
+      name: /Open profile menu/i,
     });
     vi.spyOn(profileBtn, 'getBoundingClientRect').mockReturnValue({
       top: 12,
@@ -693,7 +695,7 @@ describe('Firebase Account & Cloud Sync', () => {
     );
 
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     await act(async () => {
       mockState.setCurrentUser({
@@ -712,7 +714,7 @@ describe('Firebase Account & Cloud Sync', () => {
 
     const selectorGroup = await screen.findByRole('group', { name: /Choose a reading plan/i });
     const card = within(selectorGroup).getByText(/Canonical Bible in 1 Year/i).closest('article')!;
-    fireEvent.click(within(card).getByRole('button', { name: /Delete plan from shelf/i }));
+    fireEvent.click(within(card).getByRole('button', { name: /Remove plan from your plans/i }));
     fireEvent.click(within(card).getByRole('button', { name: /^Delete$/i }));
 
     await waitFor(() => {
@@ -744,10 +746,10 @@ describe('Firebase Account & Cloud Sync', () => {
     }
   }, 15000);
 
-  it('changes profile picture via Sanctuary seals, custom HTTPS links, Settings entry, and resets to Google photo or initials', async () => {
+  it('changes profile picture via profile icons, custom HTTPS links, Settings entry, and resets to Google photo or initials', async () => {
     window.localStorage.clear();
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     await act(async () => {
       mockState.setCurrentUser({
@@ -762,13 +764,13 @@ describe('Firebase Account & Cloud Sync', () => {
     });
 
     const accountBtn = await screen.findByRole('button', {
-      name: /Open account and cloud sync/i,
+      name: /Open profile menu/i,
     });
     expect(accountBtn.querySelector('img')?.getAttribute('src')).toBe(
       'https://example.com/google-grace.jpg'
     );
 
-    // 1. Open studio from Account Popover and select a Sanctuary seal
+    // 1. Open dialog from Account Popover and select a Profile icon
     fireEvent.click(accountBtn);
     const popover = await screen.findByTestId('account-popover');
     fireEvent.click(within(popover).getByRole('button', { name: /Change profile picture/i }));
@@ -780,7 +782,7 @@ describe('Firebase Account & Cloud Sync', () => {
     const oliveRadio = screen.getByRole('radio', { name: /Olive Branch/i });
     fireEvent.click(oliveRadio);
     expect(oliveRadio).toHaveAttribute('aria-checked', 'true');
-    fireEvent.click(screen.getByRole('button', { name: /Save portrait/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save picture/i }));
 
     await waitFor(() => {
       expect(vi.mocked(updateAccountPhotoUrl)).toHaveBeenCalledWith(
@@ -804,7 +806,7 @@ describe('Firebase Account & Cloud Sync', () => {
 
     fireEvent.change(urlInput, { target: { value: 'https://cdn.example.com/portrait.webp' } });
     fireEvent.click(screen.getByRole('button', { name: /Preview link/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Save portrait/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save picture/i }));
 
     await waitFor(() => {
       expect(vi.mocked(updateAccountPhotoUrl)).toHaveBeenLastCalledWith(
@@ -816,10 +818,10 @@ describe('Firebase Account & Cloud Sync', () => {
     });
     expect(readLocalAvatarDataUrl('avatar-uid-1')).toBeNull();
 
-    // 3. Open again from Settings, restore Google photo, and verify monogram fallback via Remove
+    // 3. Open again from Settings, restore Google photo, and verify initials fallback
     fireEvent.click(screen.getByRole('button', { name: /Change profile picture/i }));
     fireEvent.click(await screen.findByRole('button', { name: /Use Google photo/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Save portrait/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save picture/i }));
 
     await waitFor(() => {
       expect(vi.mocked(updateAccountPhotoUrl)).toHaveBeenLastCalledWith(
@@ -832,7 +834,7 @@ describe('Firebase Account & Cloud Sync', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Change profile picture/i }));
     fireEvent.click(await screen.findByRole('button', { name: /Use initials/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Save portrait/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save picture/i }));
 
     await waitFor(() => {
       expect(vi.mocked(updateAccountPhotoUrl)).toHaveBeenLastCalledWith(null);
@@ -894,7 +896,7 @@ describe('Firebase Account & Cloud Sync', () => {
 
     try {
       render(<App />);
-      expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
       await act(async () => {
         mockState.setCurrentUser({
@@ -908,7 +910,7 @@ describe('Firebase Account & Cloud Sync', () => {
       });
 
       const accountBtn = await screen.findByRole('button', {
-        name: /Open account and cloud sync/i,
+        name: /Open profile menu/i,
       });
       fireEvent.click(accountBtn);
       fireEvent.click(await screen.findByRole('button', { name: /Change profile picture/i }));
@@ -925,7 +927,7 @@ describe('Firebase Account & Cloud Sync', () => {
       expect(screen.getByText('1.5×')).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: /Apply framing/i }));
-      fireEvent.click(screen.getByRole('button', { name: /Save portrait/i }));
+      fireEvent.click(screen.getByRole('button', { name: /Save picture/i }));
 
       await waitFor(() => {
         expect(readLocalAvatarDataUrl('upload-uid-1')).toBe(croppedJpeg);
@@ -947,7 +949,7 @@ describe('Firebase Account & Cloud Sync', () => {
     mockState.userDocs.set('email-uid-1', baseUserDoc);
 
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     await act(async () => {
       mockState.setCurrentUser({
@@ -961,10 +963,10 @@ describe('Firebase Account & Cloud Sync', () => {
     });
 
     const accountBtn = await screen.findByRole('button', {
-      name: /Open account and cloud sync/i,
+      name: /Open profile menu/i,
     });
     fireEvent.click(accountBtn);
-    expect(await screen.findByText(/Synced to cloud/i)).toBeInTheDocument();
+    expect(await screen.findByText(/^Synced$/i)).toBeInTheDocument();
 
     const subs = [...(mockState.cloudSubscribers.get('email-uid-1') ?? [])];
     expect(subs.length).toBeGreaterThan(0);
@@ -976,14 +978,14 @@ describe('Firebase Account & Cloud Sync', () => {
         sub.onUserDoc(baseUserDoc, false);
       }
     });
-    expect(await screen.findByText(/Offline — saved locally/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Offline — saved on device/i)).toBeInTheDocument();
 
-    // Once logs confirm from server too, sync status returns to Synced to cloud
+    // Once logs confirm from server too, sync status returns to Synced
     await act(async () => {
       for (const sub of subs) {
         sub.onLogs([], false);
       }
     });
-    expect(await screen.findByText(/Synced to cloud/i)).toBeInTheDocument();
+    expect(await screen.findByText(/^Synced$/i)).toBeInTheDocument();
   }, 15000);
 });

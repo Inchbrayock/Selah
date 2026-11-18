@@ -9,7 +9,7 @@ import {
   getActiveReadingPlan,
   getUnreadAssignmentsForDay,
 } from '../../lib/plans';
-import { useBibleStore } from '../../store/useBibleStore';
+import { useReadingData } from '../../store/useBibleStore';
 
 interface ContinueReadingCardProps {
   onOpenBook: (bookId: string) => void;
@@ -22,7 +22,7 @@ export const ContinueReadingCard: React.FC<ContinueReadingCardProps> = ({
   onBrowseLibrary,
   onOpenPlans,
 }) => {
-  const { summary, preferences, customReadingPlans, logChapters } = useBibleStore();
+  const { summary, preferences, customReadingPlans, logChaptersBatch } = useReadingData();
   const [justLoggedPlanDay, setJustLoggedPlanDay] = useState<number | null>(null);
 
   const inProgressBooks = useMemo(
@@ -55,14 +55,16 @@ export const ContinueReadingCard: React.FC<ContinueReadingCardProps> = ({
     const targetDay = planProgress.nextDay;
     if (!targetDay) return;
     const today = todayPlainDate();
-    for (const assignment of getUnreadAssignmentsForDay(targetDay, summary)) {
-      await logChapters({
+    const unreadAssignments = getUnreadAssignmentsForDay(targetDay, summary);
+    if (unreadAssignments.length === 0) return;
+    await logChaptersBatch(
+      unreadAssignments.map((assignment) => ({
         bookId: assignment.bookId,
         chapters: assignment.chapters,
         readDate: today,
         planId: activePlan.id,
-      });
-    }
+      }))
+    );
     setJustLoggedPlanDay(targetDay.day);
     setTimeout(() => setJustLoggedPlanDay(null), 2400);
   };
@@ -92,7 +94,7 @@ export const ContinueReadingCard: React.FC<ContinueReadingCardProps> = ({
 
         {inProgressBooks.length === 0 ? (
           <p className="mt-2.5 text-sm leading-relaxed text-[var(--text-secondary)]">
-            No books mid-way right now. Open any book from the library or follow your reading plan below.
+            No books in progress yet. Open any book or follow a reading plan below.
           </p>
         ) : (
           <ul
@@ -159,7 +161,7 @@ export const ContinueReadingCard: React.FC<ContinueReadingCardProps> = ({
             <div className="flex items-center gap-2">
               <Compass className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" aria-hidden="true" />
               <p className="text-sm text-[var(--text-secondary)]">
-                No active reading plan on your shelf.
+                No active reading plan yet.
               </p>
             </div>
             <button

@@ -5,10 +5,7 @@
     --font-display: "Newsreader Variable", "Newsreader", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
     --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
 
-    --in-oklab: ;
-    --in-oklch: ;
-
-    /* Dawn Parchment (Alabaster Folio) & Vesper Candlelight (Midnight Folio) */
+    /* Light (Warm Paper) & Dark (Midnight Slate) */
     --bg-canvas-light: #F7F7F4;
     --bg-canvas-dark: #12151B;
 
@@ -171,13 +168,6 @@
     }
   }
 
-  @supports (linear-gradient(in oklab, white, black)) {
-    :root {
-      --in-oklab: in oklab;
-      --in-oklch: in oklch;
-    }
-  }
-
   html {
     font-family: var(--font-sans);
     background-color: var(--bg-canvas);
@@ -245,6 +235,10 @@
   }
 
   /* Native top-layer modal dialogs (bottom sheet on mobile, centered modal on sm+) */
+  html:has(dialog:modal) {
+    overflow: hidden;
+  }
+
   dialog:modal {
     --dialog-max-block: min(90dvh, 60rem);
     overscroll-behavior: contain;
@@ -370,6 +364,15 @@
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 @layer components {

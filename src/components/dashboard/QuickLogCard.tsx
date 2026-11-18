@@ -1,61 +1,58 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { BookMarked, Check, Plus } from 'lucide-react';
-import { BIBLE_BOOKS, BOOKS_BY_ID } from '../../data/bibleCanon';
+import { NT_BOOKS, OT_BOOKS } from '../../data/bibleCanon';
 import { todayPlainDate } from '../../lib/dates';
-import { FOLIO_EASE, SPRING_SEAL, SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
-import { parseChapterInput } from '../../lib/progress';
-import { useBibleStore } from '../../store/useBibleStore';
+import { FOLIO_EASE, SPRING_SEAL, SPRING_TACTILE } from '../../lib/motion';
+import { useReadingData } from '../../store/useBibleStore';
+import { useReadingLogForm } from '../shared/useReadingLogForm';
 
 interface QuickLogCardProps {
   onOpenBook?: (bookId: string) => void;
+  headingLevel?: 'h1' | 'h2';
 }
 
-export const QuickLogCard: React.FC<QuickLogCardProps> = ({ onOpenBook }) => {
-  const { summary, logChapters } = useBibleStore();
+export const QuickLogCard: React.FC<QuickLogCardProps> = ({
+  onOpenBook,
+  headingLevel = 'h2',
+}) => {
+  const { summary, logChapters } = useReadingData();
+  const {
+    bookId,
+    selectBook,
+    chaptersText,
+    setChaptersText,
+    readDate,
+    setReadDate,
+    note,
+    setNote,
+    error,
+    setError,
+    selectedBook,
+    selectedProgress,
+    nextChapter,
+    parseAndValidateChapters,
+  } = useReadingLogForm(summary, { syncSuggestedBook: true });
 
-  const suggestedBookId = useMemo(() => {
-    if (summary.lastReadBookId) {
-      const lastProgress = summary.bookProgressById[summary.lastReadBookId];
-      if (lastProgress && lastProgress.nextUnreadChapter !== null) {
-        return lastProgress.book.id;
-      }
-    }
-    const inProgress = BIBLE_BOOKS.find((b) => {
-      const p = summary.bookProgressById[b.id];
-      return p && p.readChapters > 0 && !p.completed;
-    });
-    return inProgress?.id ?? 'john';
-  }, [summary]);
-
-  const [bookId, setBookId] = useState<string>(suggestedBookId);
-  const manualBookSelectionRef = useRef(false);
-  const [chaptersText, setChaptersText] = useState<string>('');
-
-  useEffect(() => {
-    if (!manualBookSelectionRef.current) {
-      setBookId(suggestedBookId);
-    }
-  }, [suggestedBookId]);
-
-  const [readDate, setReadDate] = useState<string>(() => todayPlainDate());
-  const [note, setNote] = useState<string>('');
   const [loggedSource, setLoggedSource] = useState<'quick' | 'manual' | null>(null);
   const [quickStamp, setQuickStamp] = useState<{ id: number; label: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const stampIdRef = useRef(0);
 
-  const selectedBook = BOOKS_BY_ID[bookId] ?? BIBLE_BOOKS[0];
-  const selectedProgress = summary.bookProgressById[selectedBook.id];
-  const nextChapter = selectedProgress?.nextUnreadChapter ?? 1;
-
-  const continueTarget = useMemo(() => {
-    const bp = summary.bookProgressById[suggestedBookId];
-    if (!bp || bp.nextUnreadChapter === null) {
-      return { book: BOOKS_BY_ID['john'], chapter: 1 };
+  // Quick-range presets tailored to the currently selected book's next chapter
+  const rangePresets = useMemo(() => {
+    const max = selectedBook.chapterCount;
+    const start = Math.min(nextChapter, max);
+    const presets: { label: string; value: string }[] = [
+      { label: `Ch. ${start}`, value: String(start) },
+    ];
+    for (const span of [2, 3, 5]) {
+      const end = Math.min(max, start + span - 1);
+      if (end > start && !presets.some((p) => p.value === `${start}-${end}`)) {
+        presets.push({ label: `${start}–${end}`, value: `${start}-${end}` });
+      }
     }
-    return { book: bp.book, chapter: bp.nextUnreadChapter };
-  }, [suggestedBookId, summary.bookProgressById]);
+    return presets;
+  }, [nextChapter, selectedBook.chapterCount]);
 
   const triggerStamp = (label: string) => {
     const id = ++stampIdRef.current;
@@ -67,24 +64,19 @@ export const QuickLogCard: React.FC<QuickLogCardProps> = ({ onOpenBook }) => {
 
   const handleOneClickNext = async () => {
     await logChapters({
-      bookId: continueTarget.book.id,
-      chapters: [continueTarget.chapter],
+      bookId: selectedBook.id,
+      chapters: [nextChapter],
       readDate: todayPlainDate(),
     });
     setLoggedSource('quick');
-    triggerStamp(`+1 ch · ${continueTarget.book.shortName} ${continueTarget.chapter}`);
+    triggerStamp(`+1 ch · ${selectedBook.shortName} ${nextChapter}`);
     setTimeout(() => setLoggedSource((prev) => (prev === 'quick' ? null : prev)), 2200);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    const expr = chaptersText.trim() || String(nextChapter);
-    const parsed = parseChapterInput(expr, selectedBook.chapterCount);
-    if (parsed.length === 0) {
-      setError(`Enter chapter numbers between 1 and ${selectedBook.chapterCount} (for example, 1-3 or 5).`);
-      return;
-    }
+    const parsed = parseAndValidateChapters();
+    if (!parsed) return;
 
     await logChapters({
       bookId: selectedBook.id,
@@ -99,15 +91,14 @@ export const QuickLogCard: React.FC<QuickLogCardProps> = ({ onOpenBook }) => {
     setTimeout(() => setLoggedSource((prev) => (prev === 'manual' ? null : prev)), 2600);
   };
 
-  const otBooks = BIBLE_BOOKS.filter((b) => b.testament === 'OT');
-  const ntBooks = BIBLE_BOOKS.filter((b) => b.testament === 'NT');
+  const HeadingTag = headingLevel;
 
   return (
     <section
       className="folio-sheet relative flex h-full flex-col justify-between overflow-hidden p-4 sm:p-7"
       aria-labelledby="quick-log-heading"
     >
-      {/* Brief luminous seal sweep when a reading is inscribed */}
+      {/* Brief luminous seal sweep when a reading is logged */}
       <AnimatePresence>
         {quickStamp ? (
           <motion.span
@@ -125,14 +116,14 @@ export const QuickLogCard: React.FC<QuickLogCardProps> = ({ onOpenBook }) => {
       <div>
         <div className="flex flex-col justify-between gap-3.5 border-b border-[var(--border-subtle)] pb-4 sm:flex-row sm:flex-wrap sm:items-start sm:gap-4 sm:pb-5">
           <div>
-            <h2
+            <HeadingTag
               id="quick-log-heading"
-              className="font-display text-2xl font-medium text-[var(--text-primary)]"
+              className="font-display text-2xl font-medium tracking-tight text-[var(--text-primary)]"
             >
               Log a Reading
-            </h2>
+            </HeadingTag>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              Record today’s chapters or backdate an earlier session.
+              Record today’s chapters or backdate an earlier reading.
             </p>
           </div>
 
@@ -153,22 +144,23 @@ export const QuickLogCard: React.FC<QuickLogCardProps> = ({ onOpenBook }) => {
               ) : null}
             </AnimatePresence>
 
-            <motion.button
+            <button
               type="button"
-              whileTap={TACTILE_TAP}
-              transition={SPRING_TACTILE}
               onClick={() => void handleOneClickNext()}
-              className="btn-primary inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition-opacity hover:opacity-90 sm:min-h-10 sm:w-auto"
+              className="tactile-press btn-primary inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition-opacity hover:opacity-90 sm:min-h-10 sm:w-auto"
             >
               <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span>
-                Quick Log: {continueTarget.book.shortName} {continueTarget.chapter}
+                Quick Log: {selectedBook.shortName} {nextChapter}
               </span>
-            </motion.button>
+            </button>
           </div>
         </div>
 
-        <form onSubmit={(e) => void handleSubmit(e)} className="mt-5 grid grid-cols-2 gap-3.5 sm:mt-6 sm:grid-cols-12 sm:gap-4">
+        <form
+          onSubmit={(e) => void handleSubmit(e)}
+          className="mt-5 grid grid-cols-2 gap-3.5 sm:mt-6 sm:grid-cols-12 sm:gap-4"
+        >
           <div className="col-span-2 sm:col-span-5">
             <label
               htmlFor="quick-book-select"
@@ -179,22 +171,18 @@ export const QuickLogCard: React.FC<QuickLogCardProps> = ({ onOpenBook }) => {
             <select
               id="quick-book-select"
               value={bookId}
-              onChange={(e) => {
-                manualBookSelectionRef.current = true;
-                setBookId(e.target.value);
-                setError(null);
-              }}
+              onChange={(e) => selectBook(e.target.value, { clearChapters: true })}
               className="folio-input mt-1.5 min-h-11 w-full px-3 py-2 text-base font-medium sm:min-h-10 sm:text-sm"
             >
               <optgroup label="Old Testament">
-                {otBooks.map((b) => (
+                {OT_BOOKS.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name} ({b.chapterCount} ch)
                   </option>
                 ))}
               </optgroup>
               <optgroup label="New Testament">
-                {ntBooks.map((b) => (
+                {NT_BOOKS.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name} ({b.chapterCount} ch)
                   </option>
@@ -244,34 +232,69 @@ export const QuickLogCard: React.FC<QuickLogCardProps> = ({ onOpenBook }) => {
             />
           </div>
 
+          {/* 1-tap chapter range presets */}
+          {rangePresets.length > 1 && (
+            <div className="col-span-2 flex flex-wrap items-center gap-1.5 sm:col-span-12">
+              <span className="text-xs text-[var(--text-secondary)]">Quick range:</span>
+              {rangePresets.map((preset) => {
+                const isSelected = chaptersText.trim() === preset.value;
+                return (
+                  <button
+                    key={preset.value}
+                    type="button"
+                    onClick={() => {
+                      setChaptersText(preset.value);
+                      setError(null);
+                    }}
+                    className={`min-h-7 rounded-md border px-2 py-0.5 text-xs font-medium tabular-nums transition-colors ${
+                      isSelected
+                        ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div className="col-span-2 sm:col-span-8">
             <label
               htmlFor="quick-note-input"
               className="block text-xs font-medium text-[var(--text-secondary)]"
             >
-              Reflection or key verse (optional)
+              Note or key verse (optional)
             </label>
-            <input
+            <textarea
               id="quick-note-input"
-              type="text"
+              rows={2}
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="What stood out in today’s passage?"
-              className="folio-input mt-1.5 min-h-11 w-full px-3 py-2 text-base placeholder:text-[var(--text-secondary)] sm:min-h-10 sm:text-sm"
+              placeholder="What stood out in today’s reading?"
+              className="folio-input mt-1.5 w-full resize-none px-3 py-2 text-base placeholder:text-[var(--text-secondary)] sm:text-sm"
             />
           </div>
 
           <div className="col-span-2 flex items-end sm:col-span-4">
             <motion.button
               type="submit"
-              whileTap={TACTILE_TAP}
               animate={{ scale: loggedSource === 'manual' ? 1.02 : 1 }}
               transition={SPRING_TACTILE}
-              className="btn-sage inline-flex min-h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90 sm:min-h-10 sm:px-3"
+              className="tactile-press btn-sage inline-flex min-h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90 sm:min-h-10 sm:px-3"
             >
               {loggedSource === 'manual' ? (
                 <>
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <svg
+                    className="h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
                     <motion.path
                       d="M20 6 9 17l-5-5"
                       initial={{ pathLength: 0 }}
@@ -284,7 +307,7 @@ export const QuickLogCard: React.FC<QuickLogCardProps> = ({ onOpenBook }) => {
               ) : (
                 <>
                   <Plus className="h-4 w-4" aria-hidden="true" />
-                  <span>Log Passage</span>
+                  <span>Log Reading</span>
                 </>
               )}
             </motion.button>
@@ -310,7 +333,7 @@ export const QuickLogCard: React.FC<QuickLogCardProps> = ({ onOpenBook }) => {
             className="tactile-press inline-flex min-h-9 items-center gap-1.5 font-medium text-[var(--color-accent)] underline-offset-4 hover:underline"
           >
             <BookMarked className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Open {selectedBook.name} chapter grid</span>
+            <span>Open {selectedBook.name} chapters</span>
           </button>
         ) : null}
       </div>

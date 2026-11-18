@@ -1,7 +1,11 @@
 import { BOOKS_BY_ID, DIVISIONS, type DivisionMeta } from '../data/bibleCanon';
 import type { BibleDivision, ReadingLogEntry } from '../types/bible';
 import { diffCalendarDays, formatPlainDate } from './dates';
-import { type IndexedReadingLog, matchesIndexedReadingLog } from './logSearch';
+import {
+  compileLogSearchQuery,
+  type IndexedReadingLog,
+  matchesCompiledReadingLog,
+} from './logSearch';
 
 export type JournalLens = 'all' | 'reflections' | 'plan-linked';
 
@@ -62,7 +66,8 @@ export function filterJournalLogs(
   }
 ): ReadingLogEntry[] {
   const { query, lens, division } = filters;
-  const hasQuery = query.trim().length > 0;
+  const compiledQuery = compileLogSearchQuery(query);
+  const hasQuery = compiledQuery.normalized.length > 0;
 
   return indexedLogs
     .filter((entry) => {
@@ -78,7 +83,7 @@ export function filterJournalLogs(
           return false;
         }
       }
-      if (hasQuery && !matchesIndexedReadingLog(entry, query)) {
+      if (hasQuery && !matchesCompiledReadingLog(entry, compiledQuery)) {
         return false;
       }
       return true;

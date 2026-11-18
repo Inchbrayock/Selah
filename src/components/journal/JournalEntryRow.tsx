@@ -5,15 +5,14 @@ import { BOOKS_BY_ID, DIVISION_META_BY_ID } from '../../data/bibleCanon';
 import { formatPlainDate, todayPlainDate } from '../../lib/dates';
 import { getRelativeDateCue } from '../../lib/journal';
 import { FOLIO_EASE, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
-import { getReadingPlanById } from '../../lib/plans';
 import { formatChapterRanges, parseChapterInput } from '../../lib/progress';
-import { useBibleStore } from '../../store/useBibleStore';
-import type { ReadingLogEntry } from '../../types/bible';
+import type { ReadingLogEntry, ReadingPlan } from '../../types/bible';
 import { InlineDeleteConfirm } from '../ui/InlineDeleteConfirm';
 
 interface JournalEntryRowProps {
   log: ReadingLogEntry;
   todayIso: string;
+  linkedPlan: ReadingPlan | null;
   reflectionFocus?: boolean;
   onOpenBook: (bookId: string) => void;
   onOpenPlan: (planId: string) => void;
@@ -24,16 +23,16 @@ interface JournalEntryRowProps {
   onDelete: (id: string) => Promise<void>;
 }
 
-export const JournalEntryRow: React.FC<JournalEntryRowProps> = ({
+export const JournalEntryRow: React.FC<JournalEntryRowProps> = React.memo(({
   log,
   todayIso,
+  linkedPlan,
   reflectionFocus = false,
   onOpenBook,
   onOpenPlan,
   onEditSave,
   onDelete,
 }) => {
-  const { customReadingPlans } = useBibleStore();
   const book = BOOKS_BY_ID[log.bookId];
   const [isEditing, setIsEditing] = useState(false);
   const [editDate, setEditDate] = useState(log.readDate);
@@ -45,7 +44,6 @@ export const JournalEntryRow: React.FC<JournalEntryRowProps> = ({
   if (!book) return null;
 
   const divMeta = DIVISION_META_BY_ID[book.division];
-  const linkedPlan = getReadingPlanById(log.planId, customReadingPlans);
   const dateCue = getRelativeDateCue(log.readDate, todayIso);
   const chapterRange = formatChapterRanges(log.chapters);
   const chapterCount = log.chapters.length;
@@ -139,7 +137,7 @@ export const JournalEntryRow: React.FC<JournalEntryRowProps> = ({
                 htmlFor={`edit-note-${log.id}`}
                 className="block text-xs font-medium text-[var(--text-secondary)]"
               >
-                Reflection note
+                Note
               </label>
               <textarea
                 id={`edit-note-${log.id}`}
@@ -147,7 +145,7 @@ export const JournalEntryRow: React.FC<JournalEntryRowProps> = ({
                 maxLength={2000}
                 value={editNote}
                 onChange={(e) => setEditNote(e.target.value)}
-                placeholder="Write a reflection or verse note…"
+                placeholder="Write a note or key verse…"
                 className="folio-input mt-1 w-full resize-y px-3 py-2 font-display text-base leading-relaxed placeholder:font-sans placeholder:text-sm placeholder:text-[var(--text-secondary)] sm:text-[1.02rem]"
               />
             </div>
@@ -293,4 +291,5 @@ export const JournalEntryRow: React.FC<JournalEntryRowProps> = ({
       </AnimatePresence>
     </motion.li>
   );
-};
+});
+JournalEntryRow.displayName = 'JournalEntryRow';

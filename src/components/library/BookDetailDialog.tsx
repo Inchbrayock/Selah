@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { CheckCheck, RotateCw, Trash2, X } from 'lucide-react';
 import { BOOKS_BY_ID, DIVISION_META_BY_ID } from '../../data/bibleCanon';
 import { formatPlainDate, todayPlainDate } from '../../lib/dates';
 import { FOLIO_EASE, SPRING_PROGRESS, SPRING_SEAL, SPRING_TACTILE, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
-import { useBibleStore } from '../../store/useBibleStore';
+import { useReadingData } from '../../store/useBibleStore';
+import type { CanonBook, ChapterReadState } from '../../types/bible';
 import { ModalDialog } from '../ui/ModalDialog';
 
 interface BookDetailDialogProps {
@@ -14,6 +15,118 @@ interface BookDetailDialogProps {
 
 type TapMode = 'toggle' | 'range' | 'reread';
 
+interface ChapterButtonsGridProps {
+  book: CanonBook;
+  chapterMap: Record<number, ChapterReadState>;
+  tapMode: TapMode;
+  rangeStart: number | null;
+  stampedChapters: Map<number, number>;
+  onChapterClick: (e: React.MouseEvent<HTMLButtonElement>, chapter: number) => void;
+}
+
+const ChapterButtonsGrid = React.memo<ChapterButtonsGridProps>(
+  ({ book, chapterMap, tapMode, rangeStart, stampedChapters, onChapterClick }) => {
+    const chapterTitles = useMemo(() => {
+      const titles: string[] = new Array(book.chapterCount);
+      for (let idx = 0; idx < book.chapterCount; idx++) {
+        const ch = idx + 1;
+        const state = chapterMap[ch];
+        titles[idx] = state
+          ? `${book.name} ${ch} — Read ${state.readCount}× (Last: ${formatPlainDate(state.lastReadDate)})`
+          : `${book.name} ${ch} — Unread`;
+      }
+      return titles;
+    }, [book.chapterCount, book.name, chapterMap]);
+
+    return (
+      <div className="grid grid-cols-5 gap-2 sm:grid-cols-8 md:grid-cols-10">
+        {chapterTitles.map((title, idx) => {
+          const ch = idx + 1;
+          const state = chapterMap[ch];
+          const isRead = Boolean(state);
+          const readCount = state?.readCount ?? 0;
+          const isRangeAnchor = tapMode === 'range' && rangeStart === ch;
+          const stampOrder = stampedChapters.get(ch);
+          const isStamped = stampOrder !== undefined;
+
+          return (
+            <button
+              key={ch}
+              type="button"
+              onClick={(e) => onChapterClick(e, ch)}
+              aria-pressed={isRead}
+              title={title}
+              className={`relative flex min-h-12 flex-col items-center justify-center overflow-visible rounded-md border text-sm font-medium tabular-nums transition-[transform,border-color,background-color] duration-150 active:scale-90 sm:min-h-11 ${
+                isRangeAnchor
+                  ? 'ring-2 ring-[var(--color-accent)] ring-offset-1 ring-offset-[var(--bg-elevated)] animate-pulse'
+                  : ''
+              } ${
+                isRead
+                  ? 'chapter-tile-read border-[var(--color-sage)] bg-[var(--color-sage-soft)] text-[var(--color-sage)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-primary)] hover:border-[var(--color-accent)]'
+              }`}
+            >
+              {isStamped && (
+                <span
+                  aria-hidden="true"
+                  className="chapter-ripple-anim pointer-events-none absolute inset-0 rounded-md border-2 border-[var(--color-sage)]"
+                  style={{ animationDelay: `${Math.min(stampOrder * 20, 240)}ms` }}
+                />
+              )}
+              {isStamped ? (
+                <motion.span
+                  initial={{ scale: 0.72 }}
+                  animate={{ scale: [0.72, 1.12, 1] }}
+                  transition={{
+                    duration: 0.34,
+                    delay: Math.min(stampOrder * 0.018, 0.24),
+                    ease: FOLIO_EASE,
+                  }}
+                  className="flex flex-col items-center"
+                >
+                  <span>{ch}</span>
+                  {readCount >= 2 ? (
+                    <span className="text-[0.62rem] font-semibold leading-none text-[var(--color-lamp)]">
+                      {readCount}×
+                    </span>
+                  ) : isRead ? (
+                    <svg className="h-3 w-3 opacity-85" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <motion.path
+                        d="M20 6 9 17l-5-5"
+                        initial={{ pathLength: 0 }}
+                        animate={{ pathLength: 1 }}
+                        transition={{
+                          duration: 0.24,
+                          delay: Math.min(stampOrder * 0.018, 0.24),
+                          ease: FOLIO_EASE,
+                        }}
+                      />
+                    </svg>
+                  ) : null}
+                </motion.span>
+              ) : (
+                <>
+                  <span>{ch}</span>
+                  {readCount >= 2 ? (
+                    <span className="text-[0.62rem] font-semibold leading-none text-[var(--color-lamp)]">
+                      {readCount}×
+                    </span>
+                  ) : isRead ? (
+                    <svg className="h-3 w-3 opacity-80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                  ) : null}
+                </>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+);
+ChapterButtonsGrid.displayName = 'ChapterButtonsGrid';
+
 export const BookDetailDialog: React.FC<BookDetailDialogProps> = ({ bookId, onClose }) => {
   const {
     summary,
@@ -21,7 +134,7 @@ export const BookDetailDialog: React.FC<BookDetailDialogProps> = ({ bookId, onCl
     logChapters,
     markBookComplete,
     clearBookProgress,
-  } = useBibleStore();
+  } = useReadingData();
 
   const [readDate, setReadDate] = useState<string>(() => todayPlainDate());
   const [tapMode, setTapMode] = useState<TapMode>('toggle');
@@ -29,6 +142,10 @@ export const BookDetailDialog: React.FC<BookDetailDialogProps> = ({ bookId, onCl
   const [lastAnchorChapter, setLastAnchorChapter] = useState<number | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [note, setNote] = useState('');
+  const noteRef = useRef(note);
+  noteRef.current = note;
+  const readDateRef = useRef(readDate);
+  readDateRef.current = readDate;
   const [stampedChapters, setStampedChapters] = useState<Map<number, number>>(() => new Map());
   const stampTimerRef = useRef<number | null>(null);
 
@@ -45,7 +162,7 @@ export const BookDetailDialog: React.FC<BookDetailDialogProps> = ({ bookId, onCl
     }
   }, [bookId]);
 
-  const triggerChapterStamps = (chapters: number[]) => {
+  const triggerChapterStamps = useCallback((chapters: number[]) => {
     if (chapters.length === 0) return;
     if (stampTimerRef.current !== null) {
       window.clearTimeout(stampTimerRef.current);
@@ -59,76 +176,78 @@ export const BookDetailDialog: React.FC<BookDetailDialogProps> = ({ bookId, onCl
       setStampedChapters(new Map());
       stampTimerRef.current = null;
     }, 680);
-  };
+  }, []);
 
   const book = bookId ? BOOKS_BY_ID[bookId] : null;
   const bp = book ? summary.bookProgressById[book.id] : null;
   const divMeta = book ? DIVISION_META_BY_ID[book.division] : null;
 
-  const handleChapterClick = async (
-    e: React.MouseEvent<HTMLButtonElement>,
-    chapter: number
-  ) => {
-    if (!book) return;
+  const handleChapterClick = useCallback(
+    async (e: React.MouseEvent<HTMLButtonElement>, chapter: number) => {
+      if (!book) return;
+      const activeDate = readDateRef.current || todayPlainDate();
+      const activeNote = noteRef.current.trim();
 
-    if (tapMode === 'range') {
-      if (rangeStart === null) {
-        setRangeStart(chapter);
+      if (tapMode === 'range') {
+        if (rangeStart === null) {
+          setRangeStart(chapter);
+          return;
+        }
+        const start = Math.min(rangeStart, chapter);
+        const end = Math.max(rangeStart, chapter);
+        const rangeChapters = Array.from(
+          { length: end - start + 1 },
+          (_, idx) => start + idx
+        );
+        await logChapters({
+          bookId: book.id,
+          chapters: rangeChapters,
+          readDate: activeDate,
+          note: activeNote || undefined,
+        });
+        triggerChapterStamps(rangeChapters);
+        if (activeNote) setNote('');
+        setRangeStart(null);
+        setLastAnchorChapter(chapter);
         return;
       }
-      const start = Math.min(rangeStart, chapter);
-      const end = Math.max(rangeStart, chapter);
-      const rangeChapters = Array.from(
-        { length: end - start + 1 },
-        (_, idx) => start + idx
-      );
-      await logChapters({
-        bookId: book.id,
-        chapters: rangeChapters,
-        readDate: readDate || todayPlainDate(),
-        note: note.trim() || undefined,
-      });
-      triggerChapterStamps(rangeChapters);
-      if (note.trim()) setNote('');
-      setRangeStart(null);
-      setLastAnchorChapter(chapter);
-      return;
-    }
 
-    if (e.shiftKey && lastAnchorChapter !== null) {
-      const start = Math.min(lastAnchorChapter, chapter);
-      const end = Math.max(lastAnchorChapter, chapter);
-      const rangeChapters = Array.from(
-        { length: end - start + 1 },
-        (_, idx) => start + idx
-      );
-      await logChapters({
-        bookId: book.id,
-        chapters: rangeChapters,
-        readDate: readDate || todayPlainDate(),
-        note: note.trim() || undefined,
-      });
-      triggerChapterStamps(rangeChapters);
-      setNote('');
-      setLastAnchorChapter(chapter);
-      return;
-    }
+      if (e.shiftKey && lastAnchorChapter !== null) {
+        const start = Math.min(lastAnchorChapter, chapter);
+        const end = Math.max(lastAnchorChapter, chapter);
+        const rangeChapters = Array.from(
+          { length: end - start + 1 },
+          (_, idx) => start + idx
+        );
+        await logChapters({
+          bookId: book.id,
+          chapters: rangeChapters,
+          readDate: activeDate,
+          note: activeNote || undefined,
+        });
+        triggerChapterStamps(rangeChapters);
+        if (activeNote) setNote('');
+        setLastAnchorChapter(chapter);
+        return;
+      }
 
-    setLastAnchorChapter(chapter);
-    const isAlreadyRead = Boolean(bp?.chapterMap[chapter]);
-    if (!isAlreadyRead || tapMode === 'reread') {
-      await logChapters({
-        bookId: book.id,
-        chapters: [chapter],
-        readDate: readDate || todayPlainDate(),
-        note: note.trim() || undefined,
-      });
-      triggerChapterStamps([chapter]);
-      if (note.trim()) setNote('');
-    } else {
-      await toggleChapter(book.id, chapter, { rereadMode: false, readDate });
-    }
-  };
+      setLastAnchorChapter(chapter);
+      const isAlreadyRead = Boolean(bp?.chapterMap[chapter]);
+      if (!isAlreadyRead || tapMode === 'reread') {
+        await logChapters({
+          bookId: book.id,
+          chapters: [chapter],
+          readDate: activeDate,
+          note: activeNote || undefined,
+        });
+        triggerChapterStamps([chapter]);
+        if (activeNote) setNote('');
+      } else {
+        await toggleChapter(book.id, chapter, { rereadMode: false, readDate: activeDate });
+      }
+    },
+    [book, bp?.chapterMap, lastAnchorChapter, logChapters, rangeStart, tapMode, toggleChapter, triggerChapterStamps]
+  );
 
   const handleMarkAll = async () => {
     if (!book || !bp) return;
@@ -158,7 +277,7 @@ export const BookDetailDialog: React.FC<BookDetailDialogProps> = ({ bookId, onCl
       className="max-w-2xl"
     >
       {book && bp && divMeta ? (
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {/* Header */}
           <div className="relative shrink-0 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 pt-6 pb-4 sm:px-6 sm:py-5">
             <span
@@ -199,7 +318,7 @@ export const BookDetailDialog: React.FC<BookDetailDialogProps> = ({ bookId, onCl
                 type="button"
                 whileTap={TACTILE_PILL_TAP}
                 onClick={onClose}
-                aria-label={`Close ${book.name} sheet`}
+                aria-label={`Close ${book.name}`}
                 className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] sm:min-h-9 sm:min-w-9"
               >
                 <X className="h-4 w-4" aria-hidden="true" />
@@ -253,8 +372,10 @@ export const BookDetailDialog: React.FC<BookDetailDialogProps> = ({ bookId, onCl
             </div>
           </div>
 
-          {/* Controls */}
-          <div className="flex flex-col gap-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-3 sm:px-6 sm:py-3.5">
+          {/* Single Scroll Container (Controls + Chapter Grid scroll cleanly on small viewports) */}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {/* Controls */}
+            <div className="flex flex-col gap-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-3 sm:px-6 sm:py-3.5">
             <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-end sm:gap-3">
               <div className="flex items-end gap-2 sm:block">
                 <div className="min-w-[9.5rem] flex-1 sm:flex-initial">
@@ -394,8 +515,8 @@ export const BookDetailDialog: React.FC<BookDetailDialogProps> = ({ bookId, onCl
             </div>
           </div>
 
-          {/* Scrollable Chapter Grid */}
-          <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+            {/* Chapter Grid */}
+            <div className="p-4 sm:p-6">
             <div className="mb-4 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-xs text-[var(--text-secondary)]">
                 {tapMode === 'range' ? (
@@ -428,98 +549,20 @@ export const BookDetailDialog: React.FC<BookDetailDialogProps> = ({ bookId, onCl
                 type="text"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                aria-label="Optional reflection note for next chapter click"
-                placeholder="Optional note for next tap…"
+                aria-label="Optional note for next chapter tap"
+                placeholder="Add a note for next tap…"
                 className="folio-input min-h-10 w-full px-3 py-1.5 text-base placeholder:text-[var(--text-secondary)] sm:min-h-0 sm:w-56 sm:px-2.5 sm:text-xs"
               />
             </div>
 
-            <div className="grid grid-cols-5 gap-2 sm:grid-cols-8 md:grid-cols-10">
-              {Array.from({ length: book.chapterCount }, (_, idx) => {
-                const ch = idx + 1;
-                const state = bp.chapterMap[ch];
-                const isRead = Boolean(state);
-                const readCount = state?.readCount ?? 0;
-                const isRangeAnchor = tapMode === 'range' && rangeStart === ch;
-                const stampOrder = stampedChapters.get(ch);
-                const isStamped = stampOrder !== undefined;
-
-                return (
-                  <button
-                    key={ch}
-                    type="button"
-                    onClick={(e) => void handleChapterClick(e, ch)}
-                    aria-pressed={isRead}
-                    title={
-                      state
-                        ? `${book.name} ${ch} — Read ${readCount}× (Last: ${formatPlainDate(state.lastReadDate)})`
-                        : `${book.name} ${ch} — Unread`
-                    }
-                    className={`relative flex min-h-12 flex-col items-center justify-center overflow-visible rounded-md border text-sm font-medium tabular-nums transition-[transform,border-color,background-color] duration-150 active:scale-90 sm:min-h-11 ${
-                      isRangeAnchor
-                        ? 'ring-2 ring-[var(--color-accent)] ring-offset-1 ring-offset-[var(--bg-elevated)] animate-pulse'
-                        : ''
-                    } ${
-                      isRead
-                        ? 'chapter-tile-read border-[var(--color-sage)] bg-[var(--color-sage-soft)] text-[var(--color-sage)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-primary)] hover:border-[var(--color-accent)]'
-                    }`}
-                  >
-                    {isStamped && (
-                      <span
-                        aria-hidden="true"
-                        className="chapter-ripple-anim pointer-events-none absolute inset-0 rounded-md border-2 border-[var(--color-sage)]"
-                        style={{ animationDelay: `${Math.min(stampOrder * 20, 240)}ms` }}
-                      />
-                    )}
-                    {isStamped ? (
-                      <motion.span
-                        initial={{ scale: 0.72 }}
-                        animate={{ scale: [0.72, 1.12, 1] }}
-                        transition={{
-                          duration: 0.34,
-                          delay: Math.min(stampOrder * 0.018, 0.24),
-                          ease: FOLIO_EASE,
-                        }}
-                        className="flex flex-col items-center"
-                      >
-                        <span>{ch}</span>
-                        {readCount >= 2 ? (
-                          <span className="text-[0.62rem] font-semibold leading-none text-[var(--color-lamp)]">
-                            {readCount}×
-                          </span>
-                        ) : isRead ? (
-                          <svg className="h-3 w-3 opacity-85" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <motion.path
-                              d="M20 6 9 17l-5-5"
-                              initial={{ pathLength: 0 }}
-                              animate={{ pathLength: 1 }}
-                              transition={{
-                                duration: 0.24,
-                                delay: Math.min(stampOrder * 0.018, 0.24),
-                                ease: FOLIO_EASE,
-                              }}
-                            />
-                          </svg>
-                        ) : null}
-                      </motion.span>
-                    ) : (
-                      <>
-                        <span>{ch}</span>
-                        {readCount >= 2 ? (
-                          <span className="text-[0.62rem] font-semibold leading-none text-[var(--color-lamp)]">
-                            {readCount}×
-                          </span>
-                        ) : isRead ? (
-                          <svg className="h-3 w-3 opacity-80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <path d="M20 6 9 17l-5-5" />
-                          </svg>
-                        ) : null}
-                      </>
-                    )}
-                  </button>
-                );
-              })}
+            <ChapterButtonsGrid
+              book={book}
+              chapterMap={bp.chapterMap}
+              tapMode={tapMode}
+              rangeStart={rangeStart}
+              stampedChapters={stampedChapters}
+              onChapterClick={(e, ch) => void handleChapterClick(e, ch)}
+            />
             </div>
           </div>
         </div>

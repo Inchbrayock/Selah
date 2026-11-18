@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ChevronDown } from 'lucide-react';
 import {
@@ -7,10 +7,11 @@ import {
   formatPlainDate,
   parsePlainDate,
   todayPlainDate,
+  type HeatmapDay,
 } from '../../lib/dates';
-import { FOLIO_EASE, SPRING_TACTILE, TACTILE_PILL_TAP } from '../../lib/motion';
+import { FOLIO_EASE, SPRING_TACTILE } from '../../lib/motion';
 import { buildDailyChapterCounts } from '../../lib/progress';
-import { useBibleStore } from '../../store/useBibleStore';
+import { useReadingData } from '../../store/useBibleStore';
 
 type YearFilter = 'rolling' | number;
 
@@ -30,8 +31,106 @@ const LEVEL_COLORS: Record<0 | 1 | 2 | 3 | 4, string> = {
   4: 'var(--color-lamp)',
 };
 
+interface PreparedHeatmapCell extends HeatmapDay {
+  formattedDate: string;
+}
+
+interface HeatmapGridProps {
+  weeks: PreparedHeatmapCell[][];
+  dailyCounts: Record<string, number>;
+  selectedDate: string | null;
+  activeFilter: YearFilter;
+  weekGridStyle: React.CSSProperties;
+  onSelectDay: (day: { date: string; count: number }) => void;
+  onHoverDay: (day: { date: string; count: number } | null) => void;
+}
+
+const HeatmapGrid = React.memo<HeatmapGridProps>(
+  ({
+    weeks,
+    dailyCounts,
+    selectedDate,
+    activeFilter,
+    weekGridStyle,
+    onSelectDay,
+    onHoverDay,
+  }) => {
+    const resolveCellFromEvent = (target: EventTarget | null): { date: string; count: number } | null => {
+      const btn = target instanceof HTMLElement ? target.closest<HTMLButtonElement>('button[data-date]') : null;
+      if (!btn || btn.disabled) return null;
+      const date = btn.dataset.date;
+      if (!date) return null;
+      return { date, count: Number(btn.dataset.count ?? 0) };
+    };
+
+    return (
+      <div
+        className="heatmap-week-grid flex gap-[3px] lg:grid lg:flex-1"
+        style={weekGridStyle}
+        role="grid"
+        aria-label={
+          activeFilter === 'rolling'
+            ? '52-week Bible reading activity'
+            : `${activeFilter} Bible reading activity`
+        }
+        onMouseOver={(e) => {
+          const hit = resolveCellFromEvent(e.target);
+          if (hit) onHoverDay(hit);
+        }}
+        onFocus={(e) => {
+          const hit = resolveCellFromEvent(e.target);
+          if (hit) onHoverDay(hit);
+        }}
+        onMouseLeave={() => onHoverDay(null)}
+        onClick={(e) => {
+          const hit = resolveCellFromEvent(e.target);
+          if (hit) onSelectDay(hit);
+        }}
+      >
+        {weeks.map((week, wIdx) => (
+          <div key={wIdx} className="flex flex-col gap-[3px] lg:min-w-0" role="row">
+            {week.map((day) => {
+              if (day.isOutsideRange) {
+                return (
+                  <span
+                    key={day.date}
+                    aria-hidden="true"
+                    className="h-[14px] w-[14px] sm:h-[12px] sm:w-[12px] lg:aspect-square lg:h-auto lg:w-full"
+                  />
+                );
+              }
+              const count = day.isFuture ? 0 : dailyCounts[day.date] ?? 0;
+              const level = levelForCount(count);
+              const isSelected = selectedDate === day.date;
+              return (
+                <button
+                  key={day.date}
+                  type="button"
+                  disabled={day.isFuture}
+                  data-date={day.date}
+                  data-count={count}
+                  aria-label={`${day.formattedDate}: ${count} ${count === 1 ? 'chapter' : 'chapters'} read`}
+                  className={`h-[14px] w-[14px] rounded-[2px] border transition-[transform,border-color] duration-150 sm:h-[12px] sm:w-[12px] lg:aspect-square lg:h-auto lg:w-full ${
+                    day.isFuture
+                      ? 'cursor-default border-transparent opacity-25'
+                      : isSelected
+                        ? 'z-10 scale-125 border-[var(--text-primary)] ring-1 ring-[var(--text-primary)]/40'
+                        : 'border-transparent hover:border-[var(--text-primary)] active:scale-90'
+                  }`}
+                  style={{ backgroundColor: LEVEL_COLORS[level] }}
+                />
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    );
+  }
+);
+HeatmapGrid.displayName = 'HeatmapGrid';
+
 export const ReadingHeatmap: React.FC = () => {
-  const { logs, summary } = useBibleStore();
+  const { logs, summary } = useReadingData();
   const today = todayPlainDate();
   const currentYear = parsePlainDate(today).year;
   const [yearFilter, setYearFilter] = useState<YearFilter>('rolling');
@@ -87,13 +186,26 @@ export const ReadingHeatmap: React.FC = () => {
     }
   }, [activeFilter, currentYear, days, today, weekCount]);
 
+  // Precompute formatted dates once per calendar range instead of on every render
   const weeks = useMemo(() => {
-    const cols: typeof days[] = [];
+    const prepared: PreparedHeatmapCell[] = days.map((day) => ({
+      ...day,
+      formattedDate: day.isOutsideRange ? '' : formatPlainDate(day.date),
+    }));
+    const cols: PreparedHeatmapCell[][] = [];
     for (let w = 0; w < weekCount; w++) {
-      cols.push(days.slice(w * 7, w * 7 + 7));
+      cols.push(prepared.slice(w * 7, w * 7 + 7));
     }
     return cols;
   }, [days, weekCount]);
+
+  const monthLabelByWeek = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const m of monthLabels) {
+      map.set(m.weekIndex, m.label);
+    }
+    return map;
+  }, [monthLabels]);
 
   const rangeStats = useMemo(() => {
     let activeDays = 0;
@@ -150,12 +262,23 @@ export const ReadingHeatmap: React.FC = () => {
     setSelectedDay(null);
   };
 
+  const handleSelectDay = useCallback((day: { date: string; count: number }) => {
+    setSelectedDay(day);
+  }, []);
+
+  const handleHoverDay = useCallback((day: { date: string; count: number } | null) => {
+    setHoveredDay(day);
+  }, []);
+
   const filterOptions: { id: YearFilter; label: string }[] = [
     { id: 'rolling', label: 'Last 52 weeks' },
     ...availableYears.map((yr) => ({ id: yr as YearFilter, label: String(yr) })),
   ];
 
-  const weekGridStyle = { '--heatmap-weeks': weekCount } as React.CSSProperties;
+  const weekGridStyle = useMemo(
+    () => ({ '--heatmap-weeks': weekCount }) as React.CSSProperties,
+    [weekCount]
+  );
 
   return (
     <section className="folio-sheet p-4 sm:p-7" aria-labelledby="heatmap-heading">
@@ -165,31 +288,30 @@ export const ReadingHeatmap: React.FC = () => {
             id="heatmap-heading"
             className="font-display text-2xl font-medium text-[var(--text-primary)]"
           >
-            52-Week Reading Cadence
+            Reading Activity
           </h2>
           <p className="mt-1 text-sm text-[var(--text-secondary)] tabular-nums">
             {activeFilter === 'rolling'
-              ? `${rangeStats.activeDays} active reading ${rangeStats.activeDays === 1 ? 'day' : 'days'} (${rangeStats.chapters} ${rangeStats.chapters === 1 ? 'chapter' : 'chapters'}), averaging ${summary.chaptersPerWeekAvg} chapters per week`
-              : `In ${activeFilter}: ${rangeStats.activeDays} active reading ${rangeStats.activeDays === 1 ? 'day' : 'days'} (${rangeStats.chapters} ${rangeStats.chapters === 1 ? 'chapter' : 'chapters'}), averaging ${rangeStats.chaptersPerWeekAvg} chapters per week`}
+              ? `${rangeStats.activeDays} active ${rangeStats.activeDays === 1 ? 'day' : 'days'} (${rangeStats.chapters} ${rangeStats.chapters === 1 ? 'chapter' : 'chapters'}) · recent pace ${summary.chaptersPerWeekAvg} ch/wk`
+              : `In ${activeFilter}: ${rangeStats.activeDays} active ${rangeStats.activeDays === 1 ? 'day' : 'days'} (${rangeStats.chapters} ${rangeStats.chapters === 1 ? 'chapter' : 'chapters'}) · averaging ${rangeStats.chaptersPerWeekAvg} ch/wk`}
           </p>
         </div>
 
         <div className="flex flex-col items-start gap-2.5 sm:items-end">
           <div
             role="group"
-            aria-label="Filter reading cadence by year"
-            className="inline-flex max-w-full flex-nowrap items-center overflow-x-auto rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-0.5 text-xs font-medium"
+            aria-label="Filter reading activity by year"
+            className="no-scrollbar inline-flex max-w-full flex-nowrap items-center overflow-x-auto rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-0.5 text-xs font-medium"
           >
             {filterOptions.map((opt) => {
               const isActive = activeFilter === opt.id;
               return (
-                <motion.button
+                <button
                   key={String(opt.id)}
                   type="button"
-                  whileTap={TACTILE_PILL_TAP}
                   onClick={() => handleSelectFilter(opt.id)}
                   aria-pressed={isActive}
-                  className={`relative min-h-9 shrink-0 whitespace-nowrap rounded-[4px] px-2.5 py-1.5 transition-colors sm:min-h-0 sm:px-3 ${
+                  className={`tactile-press relative min-h-9 shrink-0 whitespace-nowrap rounded-[4px] px-2.5 py-1.5 transition-colors sm:min-h-0 sm:px-3 ${
                     isActive
                       ? 'text-[var(--text-primary)]'
                       : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -204,7 +326,7 @@ export const ReadingHeatmap: React.FC = () => {
                     />
                   )}
                   <span className="relative z-10 tabular-nums">{opt.label}</span>
-                </motion.button>
+                </button>
               );
             })}
           </div>
@@ -225,25 +347,22 @@ export const ReadingHeatmap: React.FC = () => {
       </div>
 
       {/* Live readout bar */}
-      <div className="mt-4 min-h-5 text-xs font-medium text-[var(--text-secondary)] tabular-nums">
+      <div className="mt-4 flex min-h-5 flex-wrap items-center justify-between gap-2 text-xs font-medium text-[var(--text-secondary)] tabular-nums">
         {inspectedDay ? (
-          <motion.span
-            key={inspectedDay.date}
-            initial={{ opacity: 0.4, y: 3 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.12, ease: FOLIO_EASE }}
-            className="inline-block"
-          >
+          <span className="inline-block">
             <strong className="font-semibold text-[var(--text-primary)]">
               {formatPlainDate(inspectedDay.date)}
             </strong>{' '}
             — {inspectedDay.count} {inspectedDay.count === 1 ? 'chapter' : 'chapters'} read
-          </motion.span>
+          </span>
         ) : (
           <span className="inline-block">
-            Tap or hover any day square to inspect chapters logged.
+            Tap or hover any square to see chapters logged.
           </span>
         )}
+        <span className="text-[0.7rem] font-normal text-[var(--text-secondary)] lg:hidden">
+          Swipe left/right to scroll months
+        </span>
       </div>
 
       <div ref={scrollContainerRef} className="mt-2 overflow-x-auto pb-2 lg:overflow-x-visible">
@@ -256,13 +375,13 @@ export const ReadingHeatmap: React.FC = () => {
               style={weekGridStyle}
             >
               {weeks.map((_, wIdx) => {
-                const label = monthLabels.find((m) => m.weekIndex === wIdx);
+                const label = monthLabelByWeek.get(wIdx);
                 return (
                   <div
                     key={wIdx}
                     className="w-[14px] shrink-0 overflow-visible whitespace-nowrap sm:w-[12px] lg:w-auto"
                   >
-                    {label ? <span>{label.label}</span> : null}
+                    {label ? <span>{label}</span> : null}
                   </div>
                 );
               })}
@@ -278,56 +397,16 @@ export const ReadingHeatmap: React.FC = () => {
               <span>Sat</span>
             </div>
 
-            {/* Week columns */}
-            <div
-              className="heatmap-week-grid flex gap-[3px] lg:grid lg:flex-1"
-              style={weekGridStyle}
-              role="grid"
-              aria-label={
-                activeFilter === 'rolling'
-                  ? '52-week Bible reading activity'
-                  : `${activeFilter} Bible reading activity`
-              }
-            >
-              {weeks.map((week, wIdx) => (
-                <div key={wIdx} className="flex flex-col gap-[3px] lg:min-w-0" role="row">
-                  {week.map((day) => {
-                    if (day.isOutsideRange) {
-                      return (
-                        <span
-                          key={day.date}
-                          aria-hidden="true"
-                          className="h-[14px] w-[14px] sm:h-[12px] sm:w-[12px] lg:aspect-square lg:h-auto lg:w-full"
-                        />
-                      );
-                    }
-                    const count = day.isFuture ? 0 : dailyCounts[day.date] ?? 0;
-                    const level = levelForCount(count);
-                    const isSelected = selectedDay?.date === day.date;
-                    return (
-                      <button
-                        key={day.date}
-                        type="button"
-                        disabled={day.isFuture}
-                        onClick={() => setSelectedDay({ date: day.date, count })}
-                        onMouseEnter={() => setHoveredDay({ date: day.date, count })}
-                        onFocus={() => setHoveredDay({ date: day.date, count })}
-                        onMouseLeave={() => setHoveredDay(null)}
-                        aria-label={`${formatPlainDate(day.date)}: ${count} ${count === 1 ? 'chapter' : 'chapters'} read`}
-                        className={`h-[14px] w-[14px] rounded-[2px] border transition-[transform,border-color] duration-150 sm:h-[12px] sm:w-[12px] lg:aspect-square lg:h-auto lg:w-full ${
-                          day.isFuture
-                            ? 'cursor-default border-transparent opacity-25'
-                            : isSelected
-                              ? 'z-10 scale-125 border-[var(--text-primary)] ring-1 ring-[var(--text-primary)]/40'
-                              : 'border-transparent hover:border-[var(--text-primary)] active:scale-90'
-                        }`}
-                        style={{ backgroundColor: LEVEL_COLORS[level] }}
-                      />
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
+            {/* Memoized 365-cell grid */}
+            <HeatmapGrid
+              weeks={weeks}
+              dailyCounts={dailyCounts}
+              selectedDate={selectedDay?.date ?? null}
+              activeFilter={activeFilter}
+              weekGridStyle={weekGridStyle}
+              onSelectDay={handleSelectDay}
+              onHoverDay={handleHoverDay}
+            />
           </div>
         </div>
       </div>
@@ -340,14 +419,12 @@ export const ReadingHeatmap: React.FC = () => {
           onClick={() => setShowMonthlyTable((prev) => !prev)}
           className="tactile-press inline-flex min-h-9 items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
         >
-          <motion.span
+          <ChevronDown
+            className={`h-3.5 w-3.5 transition-transform duration-150 ${
+              showMonthlyTable ? 'rotate-180' : ''
+            }`}
             aria-hidden="true"
-            animate={{ rotate: showMonthlyTable ? 180 : 0 }}
-            transition={SPRING_TACTILE}
-            className="inline-flex"
-          >
-            <ChevronDown className="h-3.5 w-3.5" />
-          </motion.span>
+          />
           <span>Monthly summary table</span>
         </button>
 
@@ -391,7 +468,9 @@ export const ReadingHeatmap: React.FC = () => {
                     <tbody>
                       {monthlySummary.map(([month, stats]) => (
                         <tr key={month} className="border-b border-[var(--border-subtle)]/60">
-                          <td className="py-1.5 pr-4 font-medium text-[var(--text-primary)]">{month}</td>
+                          <td className="py-1.5 pr-4 font-medium text-[var(--text-primary)]">
+                            {formatPlainDate(`${month}-01`, { month: 'short', year: 'numeric' })}
+                          </td>
                           <td className="py-1.5 pr-4 tabular-nums">{stats.activeDays}</td>
                           <td className="py-1.5 tabular-nums">{stats.chapters}</td>
                         </tr>

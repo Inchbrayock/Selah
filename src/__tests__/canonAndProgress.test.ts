@@ -110,4 +110,42 @@ describe('Progress and Streak computation', () => {
     expect(graced.currentStreak).toBe(4);
     expect(graced.graceUsedThisWeek).toBe(true);
   });
+
+  it('handles multi-year spans, double gaps, and weekly grace cooldown in O(D)', () => {
+    // Huge 30-year span should compute cleanly and fast
+    const multiYear = ['1995-01-01', '2026-11-10', '2026-11-11', '2026-11-12'];
+    expect(computeStreaks(multiYear, '2026-11-12', true)).toEqual({
+      currentStreak: 3,
+      longestStreak: 3,
+      graceUsedThisWeek: false,
+    });
+
+    // Two 1-day gaps within 7 days break the streak (Nov 3 graced, Nov 5 breaks)
+    const twoCloseGaps = [
+      '2026-11-01',
+      '2026-11-02',
+      '2026-11-04',
+      '2026-11-06',
+      '2026-11-07',
+    ];
+    expect(computeStreaks(twoCloseGaps, '2026-11-07', true).longestStreak).toBe(3);
+
+    // Two 1-day gaps spaced 7 days apart (Nov 3 & Nov 10) both bridge cleanly
+    const twoWeeklyGaps = [
+      '2026-11-01',
+      '2026-11-02',
+      '2026-11-04',
+      '2026-11-05',
+      '2026-11-06',
+      '2026-11-07',
+      '2026-11-08',
+      '2026-11-09',
+      '2026-11-11',
+      '2026-11-12',
+    ];
+    const weeklyResult = computeStreaks(twoWeeklyGaps, '2026-11-12', true);
+    expect(weeklyResult.currentStreak).toBe(10);
+    expect(weeklyResult.longestStreak).toBe(10);
+    expect(weeklyResult.graceUsedThisWeek).toBe(true);
+  });
 });

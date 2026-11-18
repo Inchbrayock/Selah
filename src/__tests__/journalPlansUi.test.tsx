@@ -11,19 +11,22 @@ describe('Journal & Plans Enhanced UI', () => {
 
   it('records, edits, and links entries to a plan directly inside Reading Journal', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Journal & Plans/i }));
-    expect(await screen.findByText(/Your journal awaits its first entry/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Your journal is empty/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Write first entry/i }));
     expect(
-      await screen.findByRole('heading', { name: /Record a reading entry/i })
+      await screen.findByRole('heading', { name: /Add a reading entry/i })
     ).toBeInTheDocument();
+
+    // Verify open composer toggle says Close instead of "+ Hide composer"
+    expect(screen.getByRole('button', { name: /^Close$/i })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(/^Book$/i), { target: { value: 'psalms' } });
     fireEvent.change(screen.getByLabelText(/^Chapters$/i), { target: { value: '23' } });
-    fireEvent.change(screen.getByLabelText(/Reflection note/i), {
+    fireEvent.change(screen.getByLabelText(/Note \(optional\)/i), {
       target: { value: 'The Lord is my shepherd.' },
     });
     fireEvent.change(screen.getByLabelText(/Associate with reading plan/i), {
@@ -35,10 +38,10 @@ describe('Journal & Plans Enhanced UI', () => {
     expect(await screen.findByRole('button', { name: /Psalms 23/i })).toBeInTheDocument();
     expect(screen.getByText(/The Lord is my shepherd\./i)).toBeInTheDocument();
 
-    // Edit reflection note via multi-line textarea
+    // Edit note via multi-line textarea
     fireEvent.click(screen.getByRole('button', { name: /Edit Psalms log/i }));
     await screen.findByRole('heading', { name: /Edit Psalms entry/i });
-    const editTextarea = screen.getByLabelText(/Reflection note/i);
+    const editTextarea = screen.getByLabelText(/^Note$/i);
     fireEvent.change(editTextarea, {
       target: { value: 'Still waters restore my soul.' },
     });
@@ -49,19 +52,19 @@ describe('Journal & Plans Enhanced UI', () => {
     });
     expect(screen.getByText(/Still waters restore my soul\./i)).toBeInTheDocument();
 
-    // Follow plan provenance link straight to Plans view
+    // Follow plan link straight to Plans view
     fireEvent.click(screen.getByRole('button', { name: /Psalms & Proverbs Month/i }));
-    expect(await screen.findByText(/Guided Reading Plans/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: /Reading Plans/i })).toBeInTheDocument();
     expect(
       screen.getByRole('heading', { level: 2, name: /Psalms & Proverbs Month/i })
     ).toBeInTheDocument();
   });
 
-  it('filters Reading Journal by Reflections lens, Plan lens, and Biblical division', async () => {
+  it('filters Reading Journal by With notes lens, Plan lens, and Bible section', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Preview Sample Journey/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Try sample data/i }));
     await waitFor(() => {
       expect(screen.getByText(/days streak/i)).toBeInTheDocument();
     });
@@ -69,14 +72,14 @@ describe('Journal & Plans Enhanced UI', () => {
     fireEvent.click(screen.getByRole('button', { name: /Journal & Plans/i }));
     expect(await screen.findByText(/Reading Journal/i)).toBeInTheDocument();
 
-    // Sample journey includes both noted and note-free entries (e.g. Mark 1-6 has no note)
+    // Sample data includes both noted and note-free entries (e.g. Mark 1-6 has no note)
     expect(screen.getByRole('button', { name: /Mark 1–6/i })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /^Reflections$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^With notes$/i }));
     expect(screen.queryByRole('button', { name: /Mark 1–6/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Romans 7–8/i })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText(/Filter entries by biblical division/i), {
+    fireEvent.change(screen.getByLabelText(/Filter entries by Bible section/i), {
       target: { value: 'pauline' },
     });
     expect(screen.getByRole('button', { name: /Romans 7–8/i })).toBeInTheDocument();
@@ -89,14 +92,14 @@ describe('Journal & Plans Enhanced UI', () => {
     expect(screen.getByRole('button', { name: /Mark 1–6/i })).toBeInTheDocument();
   });
 
-  it('supports partial plan days, logging with a reflection note, and navigating 365-day stages', async () => {
+  it('supports partial plan days, logging with a note, and navigating 365-day stages', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Journal & Plans/i }));
     expect(await screen.findByText(/Reading Journal/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Reading Plans/i }));
-    expect(await screen.findByText(/Guided Reading Plans/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: /Reading Plans/i })).toBeInTheDocument();
 
     // Switch to Psalms & Proverbs Month
     const planGroup = screen.getByRole('group', { name: /Choose a reading plan/i });
@@ -115,11 +118,11 @@ describe('Journal & Plans Enhanced UI', () => {
     await waitFor(() => {
       expect(screen.getByText(/1 of 31 chapters read/i)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole('button', { name: /Close Proverbs sheet/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Close Proverbs/i }));
 
     // Day 1 should now display partial completion and Finish Day 1 CTA
     expect(await within(activePlanSection).findByText(/1 of 6 chapters read/i)).toBeInTheDocument();
-    fireEvent.change(within(activePlanSection).getByLabelText(/Reflection note/i), {
+    fireEvent.change(within(activePlanSection).getByLabelText(/Note \(optional\)/i), {
       target: { value: 'Ask for wisdom before speaking.' },
     });
     fireEvent.click(within(activePlanSection).getByRole('button', { name: /Finish Day 1/i }));
@@ -128,15 +131,15 @@ describe('Journal & Plans Enhanced UI', () => {
       expect(within(activePlanSection).getByText(/Up next: Day 2 of 31/i)).toBeInTheDocument();
     });
 
-    // Day 1 in the itinerary shows 1 reflection and links back to the Journal
-    const itinerarySection = screen.getByRole('region', { name: /Daily Itinerary/i });
-    const reflectionToggle = within(itinerarySection).getByRole('button', {
-      name: /1 reflection/i,
+    // Day 1 in Daily Readings shows 1 note and links back to the Journal
+    const readingsSection = screen.getByRole('region', { name: /Daily Readings/i });
+    const noteToggle = within(readingsSection).getByRole('button', {
+      name: /1 note/i,
     });
-    fireEvent.click(reflectionToggle);
-    expect(within(itinerarySection).getByText(/Ask for wisdom before speaking\./i)).toBeInTheDocument();
+    fireEvent.click(noteToggle);
+    expect(within(readingsSection).getByText(/Ask for wisdom before speaking\./i)).toBeInTheDocument();
 
-    fireEvent.click(within(itinerarySection).getByRole('button', { name: /Open in journal/i }));
+    fireEvent.click(within(readingsSection).getByRole('button', { name: /Open in journal/i }));
     expect(await screen.findByText(/Reading Journal/i)).toBeInTheDocument();
     expect(screen.getByText(/Ask for wisdom before speaking\./i)).toBeInTheDocument();
 
@@ -145,22 +148,22 @@ describe('Journal & Plans Enhanced UI', () => {
     const selector = screen.getByRole('group', { name: /Choose a reading plan/i });
     fireEvent.click(within(selector).getByRole('button', { name: /Canonical Bible in 1 Year/i }));
 
-    const journeyMap = screen.getByRole('region', { name: /Journey Map/i });
-    fireEvent.click(within(journeyMap).getByRole('button', { name: /Month 6/i }));
+    const progressMap = screen.getByRole('region', { name: /Progress Map/i });
+    fireEvent.click(within(progressMap).getByRole('button', { name: /Month 6/i }));
 
-    const refreshedItinerary = screen.getByRole('region', { name: /Daily Itinerary/i });
-    expect(within(refreshedItinerary).getByText(/Month 6: Days 152–181/i)).toBeInTheDocument();
-    expect(within(refreshedItinerary).getByRole('button', { name: /Log Day 152/i })).toBeInTheDocument();
+    const refreshedReadings = screen.getByRole('region', { name: /Daily Readings/i });
+    expect(within(refreshedReadings).getByText(/Month 6: Days 152–181/i)).toBeInTheDocument();
+    expect(within(refreshedReadings).getByRole('button', { name: /Log Day 152/i })).toBeInTheDocument();
   });
 
   it('finds and previews plans in Plan Finder and creates, edits, and deletes custom plans', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Journal & Plans/i }));
     expect(await screen.findByText(/Reading Journal/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Reading Plans/i }));
-    expect(await screen.findByText(/Guided Reading Plans/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: /Reading Plans/i })).toBeInTheDocument();
 
     // Open Plan Finder
     fireEvent.click(screen.getByRole('button', { name: /Find a plan/i }));
@@ -222,15 +225,16 @@ describe('Journal & Plans Enhanced UI', () => {
       within(activeCustomSection).getByRole('heading', { level: 3, name: /Ephesians 1–2/i })
     ).toBeInTheDocument();
 
-    // Verify custom plan reflects on Sanctuary dashboard too
-    fireEvent.click(screen.getByRole('button', { name: /^Sanctuary$/i }));
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    // Verify custom plan reflects on Home dashboard too
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    fireEvent.click(within(nav).getByRole('button', { name: /^Home$/i }));
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /Ephesians & Philippians/i })).toBeInTheDocument();
     expect(screen.getByText(/0 of 5 days/i)).toBeInTheDocument();
 
     // Return to Plans and edit + delete the custom plan cleanly
     fireEvent.click(screen.getByRole('button', { name: /All plans/i }));
-    expect(await screen.findByText(/Guided Reading Plans/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: /Reading Plans/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Edit plan/i }));
     const editBuilder = await screen.findByRole('region', {
@@ -253,12 +257,12 @@ describe('Journal & Plans Enhanced UI', () => {
     ).toBeInTheDocument();
   });
 
-  it('starts with 4 plans on the shelf and allows deleting, undoing, clearing, and restoring shelf plans', async () => {
+  it('starts with 4 plans on the shelf and allows removing, undoing, clearing, and restoring plans', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
-    // Even after loading Sample Journey logs across many books, the default shelf starts at 4 plans
-    fireEvent.click(screen.getByRole('button', { name: /Preview Sample Journey/i }));
+    // Even after loading Sample Data across many books, the default plans start at 4
+    fireEvent.click(screen.getByRole('button', { name: /Try sample data/i }));
     await waitFor(() => {
       expect(screen.getByText(/days streak/i)).toBeInTheDocument();
     });
@@ -270,11 +274,14 @@ describe('Journal & Plans Enhanced UI', () => {
     const selectorGroup = await screen.findByRole('group', { name: /Choose a reading plan/i });
     expect(within(selectorGroup).getAllByRole('article')).toHaveLength(4);
 
-    // Clicking delete on a default plan asks for inline Cancel/Delete confirmation before removing
+    // Sample data marks later days done while Day 1 is unread -> clarify message appears
+    expect(screen.getByText(/later days already done from your log/i)).toBeInTheDocument();
+
+    // Clicking remove on a default plan asks for inline Cancel/Delete confirmation before removing
     const canonicalCard = within(selectorGroup)
       .getByText(/Canonical Bible in 1 Year/i)
       .closest('article')!;
-    fireEvent.click(within(canonicalCard).getByRole('button', { name: /Delete plan from shelf/i }));
+    fireEvent.click(within(canonicalCard).getByRole('button', { name: /Remove plan from your plans/i }));
     expect(within(canonicalCard).getByRole('button', { name: /^Cancel$/i })).toBeInTheDocument();
     expect(within(canonicalCard).getByRole('button', { name: /^Delete$/i })).toBeInTheDocument();
     expect(within(selectorGroup).getAllByRole('article')).toHaveLength(4);
@@ -284,8 +291,8 @@ describe('Journal & Plans Enhanced UI', () => {
     expect(within(canonicalCard).queryByRole('button', { name: /^Cancel$/i })).not.toBeInTheDocument();
     expect(within(selectorGroup).getAllByRole('article')).toHaveLength(4);
 
-    // Confirming removes Canonical Bible in 1 Year from the shelf
-    fireEvent.click(within(canonicalCard).getByRole('button', { name: /Delete plan from shelf/i }));
+    // Confirming removes Canonical Bible in 1 Year
+    fireEvent.click(within(canonicalCard).getByRole('button', { name: /Remove plan from your plans/i }));
     fireEvent.click(within(canonicalCard).getByRole('button', { name: /^Delete$/i }));
 
     await waitFor(() => {
@@ -299,19 +306,19 @@ describe('Journal & Plans Enhanced UI', () => {
       expect(within(selectorGroup).getAllByRole('article')).toHaveLength(4);
     });
 
-    // Delete the currently active plan (Gospels & Acts Journey) -> advances active to next shelf plan
+    // Remove the currently active plan (Gospels & Acts Journey) -> advances active to next plan
     const activeGospelsCard = within(selectorGroup)
       .getByText(/Gospels & Acts Journey/i)
       .closest('article')!;
     fireEvent.click(
-      within(activeGospelsCard).getByRole('button', { name: /Delete plan from shelf/i })
+      within(activeGospelsCard).getByRole('button', { name: /Remove plan from your plans/i })
     );
     fireEvent.click(within(activeGospelsCard).getByRole('button', { name: /^Delete$/i }));
     expect(
       await screen.findByRole('heading', { level: 2, name: /Psalms & Proverbs Month/i })
     ).toBeInTheDocument();
 
-    // Delete the remaining 3 curated plans down to an empty shelf
+    // Remove the remaining 3 curated plans down to an empty list
     for (const title of [
       'Psalms & Proverbs Month',
       'New Testament in 90 Days',
@@ -319,20 +326,23 @@ describe('Journal & Plans Enhanced UI', () => {
     ]) {
       const updatedGroup = screen.getByRole('group', { name: /Choose a reading plan/i });
       const card = within(updatedGroup).getByText(title).closest('article')!;
-      fireEvent.click(within(card).getByRole('button', { name: /Delete plan from shelf/i }));
+      fireEvent.click(within(card).getByRole('button', { name: /Remove plan from your plans/i }));
       fireEvent.click(within(card).getByRole('button', { name: /^Delete$/i }));
     }
 
     expect(await screen.findByText(/No reading plans on your shelf/i)).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: /Daily Itinerary/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /Daily Readings/i })).not.toBeInTheDocument();
 
-    // Verify Sanctuary dashboard reflects no active reading plan on shelf cleanly
-    fireEvent.click(screen.getByRole('button', { name: /^Sanctuary$/i }));
-    expect(await screen.findByText(/No active reading plan on your shelf/i)).toBeInTheDocument();
+    // Verify Home dashboard reflects no active reading plan cleanly
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    fireEvent.click(within(nav).getByRole('button', { name: /^Home$/i }));
+    expect(await screen.findByText(/No active reading plan yet/i)).toBeInTheDocument();
 
     // Return via Choose a plan and restore the 4 starter plans
     fireEvent.click(screen.getByRole('button', { name: /Choose a plan/i }));
-    expect(await screen.findByText(/Guided Reading Plans/i, {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { level: 1, name: /Reading Plans/i }, { timeout: 4000 })
+    ).toBeInTheDocument();
     fireEvent.click(
       await screen.findByRole('button', { name: /Restore 4 starter plans/i }, { timeout: 4000 })
     );
@@ -343,7 +353,7 @@ describe('Journal & Plans Enhanced UI', () => {
       await screen.findByRole('heading', { level: 2, name: /Gospels & Acts Journey/i })
     ).toBeInTheDocument();
 
-    // Create a custom plan and delete it directly from its shelf card
+    // Create a custom plan and delete it directly from its card
     fireEvent.click(screen.getByRole('button', { name: /Create custom plan/i }));
     const builder = await screen.findByRole('region', { name: /Create custom reading plan/i });
     fireEvent.change(within(builder).getByLabelText(/Plan title/i), {
@@ -363,7 +373,7 @@ describe('Journal & Plans Enhanced UI', () => {
       .getByText(/Ephesians Solo/i)
       .closest('article')!;
     fireEvent.click(
-      within(customShelfCard).getByRole('button', { name: /Delete custom plan from shelf/i })
+      within(customShelfCard).getByRole('button', { name: /Delete custom plan/i })
     );
     fireEvent.click(within(customShelfCard).getByRole('button', { name: /^Delete$/i }));
 

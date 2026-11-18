@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Grid3x3, LayoutGrid, Search } from 'lucide-react';
 import { BIBLE_BOOKS, DIVISIONS } from '../../data/bibleCanon';
 import { FOLIO_EASE, SPRING_TACTILE, TACTILE_PILL_TAP } from '../../lib/motion';
-import { useBibleStore } from '../../store/useBibleStore';
+import { useReadingData } from '../../store/useBibleStore';
 import type { BibleDivision, Testament } from '../../types/bible';
 import { BookCard } from './BookCard';
 import { WholeBibleMosaic } from './WholeBibleMosaic';
@@ -16,7 +16,7 @@ type StatusFilter = 'all' | 'unread' | 'in-progress' | 'completed';
 type ViewMode = 'bookshelf' | 'mosaic';
 
 export const LibraryView: React.FC<LibraryViewProps> = ({ onOpenBook }) => {
-  const { summary } = useBibleStore();
+  const { summary } = useReadingData();
   const [viewMode, setViewMode] = useState<ViewMode>('bookshelf');
   const [testament, setTestament] = useState<'ALL' | Testament>('ALL');
   const [division, setDivision] = useState<'ALL' | BibleDivision>('ALL');
@@ -71,10 +71,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onOpenBook }) => {
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:flex-wrap sm:items-end">
           <div>
             <h1 className="font-display text-2xl font-medium tracking-tight text-[var(--text-primary)] sm:text-[2.15rem]">
-              Scripture Library
+              Books
             </h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)] tabular-nums">
-              {summary.booksCompleted} of 66 books completed, {summary.totalChaptersRead.toLocaleString()} of 1,189 chapters read
+              {summary.booksCompleted} of 66 books completed · {summary.totalChaptersRead.toLocaleString()} of 1,189 chapters read
             </p>
           </div>
 
@@ -115,7 +115,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onOpenBook }) => {
                     ) : (
                       <>
                         <Grid3x3 className="h-4 w-4" aria-hidden="true" />
-                        <span>1,189 Mosaic</span>
+                        <span>Chapter Map</span>
                       </>
                     )}
                   </span>
@@ -148,7 +148,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onOpenBook }) => {
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       aria-label="Search Bible books"
-                      placeholder="Search book or theme (Psalms, Grace, Rom)…"
+                      placeholder="Search books or themes…"
                       className="folio-input min-h-11 w-full py-2 pl-9 pr-3 text-base placeholder:text-[var(--text-secondary)] sm:min-h-10 sm:text-sm"
                     />
                   </div>
@@ -205,7 +205,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onOpenBook }) => {
                 </div>
 
                 {/* Division Chips (horizontal scroll rail on mobile, wrap on sm+) */}
-                <div className="-mx-3.5 flex flex-nowrap gap-1.5 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
+                <div className="no-scrollbar -mx-3.5 flex flex-nowrap gap-1.5 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
                   <motion.button
                     type="button"
                     whileTap={TACTILE_PILL_TAP}
@@ -217,7 +217,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onOpenBook }) => {
                         : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
                     }`}
                   >
-                    All divisions
+                    All sections
                   </motion.button>
                   {availableDivisions.map((div) => (
                     <motion.button

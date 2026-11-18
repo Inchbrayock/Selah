@@ -199,7 +199,6 @@ export async function deleteCustomPlan(id: string): Promise<void> {
 }
 
 export async function replaceAllCustomPlans(customPlans: CustomPlanDefinition[]): Promise<void> {
-  const current = await loadSanctuaryState();
   try {
     await db.transaction('rw', db.customPlans, async () => {
       await db.customPlans.clear();
@@ -208,27 +207,34 @@ export async function replaceAllCustomPlans(customPlans: CustomPlanDefinition[])
       }
     });
   } catch {
+    const current = await readFallback();
     await writeFallback(current.logs, current.preferences, customPlans);
   }
 }
 
-export async function addReadingLog(input: {
+export interface AddReadingLogInput {
   bookId: string;
   chapters: number[];
   readDate?: string;
   note?: string;
   planId?: string;
-}): Promise<ReadingLogEntry> {
+}
+
+function buildReadingLogEntry(input: AddReadingLogInput, nowIso: string): ReadingLogEntry {
   const uniqueChapters = [...new Set(input.chapters)].sort((a, b) => a - b);
-  const entry: ReadingLogEntry = {
+  return {
     id: createId(),
     bookId: input.bookId,
     chapters: uniqueChapters,
     readDate: input.readDate ?? todayPlainDate(),
-    loggedAt: new Date().toISOString(),
+    loggedAt: nowIso,
     note: input.note?.trim() ? input.note.trim() : undefined,
     planId: input.planId,
   };
+}
+
+export async function addReadingLog(input: AddReadingLogInput): Promise<ReadingLogEntry> {
+  const entry = buildReadingLogEntry(input, new Date().toISOString());
 
   try {
     await db.readingLogs.put(entry);
@@ -237,6 +243,24 @@ export async function addReadingLog(input: {
     await writeFallback([...current.logs, entry], current.preferences, current.customPlans);
   }
   return entry;
+}
+
+export async function addReadingLogsBatch(inputs: AddReadingLogInput[]): Promise<ReadingLogEntry[]> {
+  if (inputs.length === 0) return [];
+  const baseMs = Date.now();
+  const entries = inputs.map((input, idx) =>
+    buildReadingLogEntry(input, new Date(baseMs + idx).toISOString())
+  );
+
+  try {
+    await db.transaction('rw', db.readingLogs, async () => {
+      await db.readingLogs.bulkPut(entries);
+    });
+  } catch {
+    const current = await readFallback();
+    await writeFallback([...current.logs, ...entries], current.preferences, current.customPlans);
+  }
+  return entries;
 }
 
 export async function updateReadingLog(
@@ -278,43 +302,75 @@ export async function deleteReadingLog(id: string): Promise<void> {
 
 /**
  * Removes specific chapters from existing logs for a book (used when un-checking chapters).
- * Deletes a log entry completely if no chapters remain in it.
+ * Deletes a log entry completely if no chapters remain in it, using targeted IndexedDB writes.
  */
 export async function removeChaptersFromBookLogs(
   bookId: string,
-  chaptersToRemove: number[]
+  chaptersToRemove: number[],
+  knownLogs?: ReadingLogEntry[]
 ): Promise<ReadingLogEntry[]> {
   const removeSet = new Set(chaptersToRemove);
-  const { logs, preferences, customPlans } = await loadSanctuaryState();
-  const nextLogs: ReadingLogEntry[] = [];
-
-  for (const log of logs) {
-    if (log.bookId !== bookId) {
-      nextLogs.push(log);
-      continue;
-    }
-    const remaining = log.chapters.filter((ch) => !removeSet.has(ch));
-    if (remaining.length > 0) {
-      nextLogs.push({ ...log, chapters: remaining });
-    }
-  }
 
   try {
-    await db.transaction('rw', db.readingLogs, async () => {
-      await db.readingLogs.clear();
-      if (nextLogs.length > 0) {
-        await db.readingLogs.bulkPut(nextLogs);
-      }
-    });
-  } catch {
-    await writeFallback(nextLogs, preferences, customPlans);
-  }
+    const bookLogs =
+      knownLogs !== undefined
+        ? knownLogs.filter((l) => l.bookId === bookId)
+        : await db.readingLogs.where('bookId').equals(bookId).toArray();
 
-  return nextLogs;
+    const modified: ReadingLogEntry[] = [];
+    const deletedIds: string[] = [];
+
+    for (const log of bookLogs) {
+      const remaining = log.chapters.filter((ch) => !removeSet.has(ch));
+      if (remaining.length === 0) {
+        deletedIds.push(log.id);
+      } else if (remaining.length !== log.chapters.length) {
+        modified.push({ ...log, chapters: remaining });
+      }
+    }
+
+    if (modified.length > 0 || deletedIds.length > 0) {
+      await db.transaction('rw', db.readingLogs, async () => {
+        if (modified.length > 0) {
+          await db.readingLogs.bulkPut(modified);
+        }
+        if (deletedIds.length > 0) {
+          await db.readingLogs.bulkDelete(deletedIds);
+        }
+      });
+    }
+
+    if (knownLogs !== undefined) {
+      const deletedSet = new Set(deletedIds);
+      const modifiedMap = new Map(modified.map((l) => [l.id, l]));
+      const nextLogs: ReadingLogEntry[] = [];
+      for (const log of knownLogs) {
+        if (deletedSet.has(log.id)) continue;
+        nextLogs.push(modifiedMap.get(log.id) ?? log);
+      }
+      return nextLogs;
+    }
+
+    return await db.readingLogs.toArray();
+  } catch {
+    const { logs, preferences, customPlans } = await readFallback();
+    const nextLogs: ReadingLogEntry[] = [];
+    for (const log of logs) {
+      if (log.bookId !== bookId) {
+        nextLogs.push(log);
+        continue;
+      }
+      const remaining = log.chapters.filter((ch) => !removeSet.has(ch));
+      if (remaining.length > 0) {
+        nextLogs.push({ ...log, chapters: remaining });
+      }
+    }
+    await writeFallback(nextLogs, preferences, customPlans);
+    return nextLogs;
+  }
 }
 
 export async function replaceAllLogs(logs: ReadingLogEntry[]): Promise<void> {
-  const { preferences, customPlans } = await loadSanctuaryState();
   try {
     await db.transaction('rw', db.readingLogs, async () => {
       await db.readingLogs.clear();
@@ -323,6 +379,7 @@ export async function replaceAllLogs(logs: ReadingLogEntry[]): Promise<void> {
       }
     });
   } catch {
+    const { preferences, customPlans } = await readFallback();
     await writeFallback(logs, preferences, customPlans);
   }
 }

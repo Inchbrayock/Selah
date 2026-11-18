@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { BookOpen, Check, Lock, Users } from 'lucide-react';
+import { BookOpen, Check, Lock, UserPlus, Users } from 'lucide-react';
 import { SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
-import { useBibleStore } from '../../store/useBibleStore';
+import { useAccountSync, useFriendsStore } from '../../store/useBibleStore';
 import type { ReadingPlan, SharedPlanCohort } from '../../types/bible';
 import { ModalDialog } from '../ui/ModalDialog';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
@@ -10,30 +10,37 @@ import { ProfileAvatar } from '../ui/ProfileAvatar';
 interface ReadTogetherModalProps {
   open: boolean;
   plan: ReadingPlan | null;
+  availablePlans?: ReadingPlan[];
   existingCohort?: SharedPlanCohort | null;
+  initialFriendUid?: string | null;
   onClose: () => void;
   onCreated?: (cohort: SharedPlanCohort) => void;
+  onOpenAccount?: () => void;
+  onOpenFriends?: () => void;
 }
 
 export const ReadTogetherModal: React.FC<ReadTogetherModalProps> = ({
   open,
   plan,
+  availablePlans,
   existingCohort = null,
+  initialFriendUid = null,
   onClose,
   onCreated,
+  onOpenAccount,
+  onOpenFriends,
 }) => {
-  const { user, friends, createSharedPlanCohort, inviteFriendToSharedCohort } = useBibleStore();
+  const { user } = useAccountSync();
+  const { friends, createSharedPlanCohort, inviteFriendToSharedCohort } = useFriendsStore();
+  const [pickedPlanId, setPickedPlanId] = useState<string>(plan?.id ?? availablePlans?.[0]?.id ?? '');
   const [selectedUids, setSelectedUids] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (open) {
-      setSelectedUids([]);
-      setSubmitting(false);
-      setError(null);
-    }
-  }, [open, plan?.id, existingCohort?.id]);
+  const effectivePlan = useMemo(() => {
+    if (existingCohort || !availablePlans || availablePlans.length === 0) return plan;
+    return availablePlans.find((p) => p.id === pickedPlanId) ?? plan ?? availablePlans[0] ?? null;
+  }, [availablePlans, existingCohort, pickedPlanId, plan]);
 
   const alreadyInvited = useMemo(
     () => new Set(existingCohort?.participantUids ?? []),
@@ -44,6 +51,21 @@ export const ReadTogetherModal: React.FC<ReadTogetherModalProps> = ({
     () => friends.filter((f) => !alreadyInvited.has(f.friendUid)),
     [alreadyInvited, friends]
   );
+
+  useEffect(() => {
+    if (open) {
+      setPickedPlanId(plan?.id ?? availablePlans?.[0]?.id ?? '');
+      const preselect =
+        initialFriendUid &&
+        !alreadyInvited.has(initialFriendUid) &&
+        friends.some((f) => f.friendUid === initialFriendUid)
+          ? [initialFriendUid]
+          : [];
+      setSelectedUids(preselect);
+      setSubmitting(false);
+      setError(null);
+    }
+  }, [open, plan?.id, existingCohort?.id, initialFriendUid, alreadyInvited, availablePlans, friends]);
 
   const remainingSlots = existingCohort
     ? Math.max(0, 12 - existingCohort.participantUids.length)
@@ -63,7 +85,7 @@ export const ReadTogetherModal: React.FC<ReadTogetherModalProps> = ({
   }
 
   async function handleSubmit() {
-    if (!plan || submitting) return;
+    if (!effectivePlan || submitting) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -73,7 +95,7 @@ export const ReadTogetherModal: React.FC<ReadTogetherModalProps> = ({
         }
         onClose();
       } else {
-        const created = await createSharedPlanCohort(plan, selectedUids);
+        const created = await createSharedPlanCohort(effectivePlan, selectedUids);
         onCreated?.(created);
         onClose();
       }
@@ -84,9 +106,10 @@ export const ReadTogetherModal: React.FC<ReadTogetherModalProps> = ({
     }
   }
 
-  if (!plan) return null;
+  if (!effectivePlan) return null;
 
   const isInvitingMore = Boolean(existingCohort);
+  const showPlanPicker = !isInvitingMore && Boolean(availablePlans && availablePlans.length > 1);
 
   return (
     <ModalDialog
@@ -109,48 +132,89 @@ export const ReadTogetherModal: React.FC<ReadTogetherModalProps> = ({
             </h2>
             <p className="mt-0.5 text-xs leading-relaxed text-[var(--text-secondary)]">
               {isInvitingMore
-                ? `Add Reading Circle companions to "${existingCohort?.title}".`
-                : `Share "${plan.title}" so accepted friends can track their reading days alongside you.`}
+                ? `Invite friends to join "${existingCohort?.title}".`
+                : `Share "${effectivePlan.title}" so friends can track reading days alongside you.`}
             </p>
           </div>
         </div>
 
         <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <BookOpen className="h-4 w-4 shrink-0 text-[var(--color-accent)]" aria-hidden="true" />
-              <p className="truncate font-display text-base font-medium text-[var(--text-primary)]">
-                {plan.title}
-              </p>
+          {showPlanPicker && availablePlans ? (
+            <div className="space-y-2">
+              <label
+                htmlFor="read-together-plan-select"
+                className="block text-xs font-medium text-[var(--text-secondary)]"
+              >
+                Choose reading plan
+              </label>
+              <select
+                id="read-together-plan-select"
+                value={effectivePlan.id}
+                onChange={(e) => setPickedPlanId(e.target.value)}
+                className="folio-input min-h-10 w-full px-3 py-1.5 text-sm font-medium text-[var(--text-primary)]"
+              >
+                {availablePlans.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.title} ({p.durationDays} {p.durationDays === 1 ? 'day' : 'days'})
+                  </option>
+                ))}
+              </select>
             </div>
-            <span className="shrink-0 text-xs text-[var(--text-secondary)] tabular-nums">
-              {plan.durationDays} {plan.durationDays === 1 ? 'day' : 'days'}
-            </span>
-          </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <BookOpen className="h-4 w-4 shrink-0 text-[var(--color-accent)]" aria-hidden="true" />
+                <p className="truncate font-display text-base font-medium text-[var(--text-primary)]">
+                  {effectivePlan.title}
+                </p>
+              </div>
+              <span className="shrink-0 text-xs text-[var(--text-secondary)] tabular-nums">
+                {effectivePlan.durationDays} {effectivePlan.durationDays === 1 ? 'day' : 'days'}
+              </span>
+            </div>
+          )}
           <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-[var(--text-secondary)]">
             <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--color-sage)]" aria-hidden="true" />
             <span>
-              Only completed plan days and chapter totals are shared. Your journal notes and reflections
-              always stay private.
+              Only completed plan days and chapter totals are shared. Your journal notes always stay
+              private.
             </span>
           </p>
         </div>
 
         {!user ? (
-          <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 text-xs leading-relaxed text-[var(--text-secondary)]">
-            Sign in to your Selah cloud account to invite accepted Reading Circle friends to read{' '}
-            <strong className="font-medium text-[var(--text-primary)]">{plan.title}</strong> together.
+          <div className="space-y-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 text-xs leading-relaxed text-[var(--text-secondary)]">
+            <p>
+              Sign in to invite friends to read{' '}
+              <strong className="font-medium text-[var(--text-primary)]">{effectivePlan.title}</strong>{' '}
+              together.
+            </p>
           </div>
         ) : eligibleFriends.length === 0 ? (
-          <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 text-xs leading-relaxed text-[var(--text-secondary)]">
-            {friends.length === 0
-              ? 'Your Reading Circle has no accepted friends yet. Connect with friends on the Friends tab, or create this shared group now and invite friends later.'
-              : 'All accepted friends in your Reading Circle are already invited to this shared plan.'}
+          <div className="space-y-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 text-xs leading-relaxed text-[var(--text-secondary)]">
+            <p>
+              {friends.length === 0
+                ? 'You haven’t added any friends yet. Add friends first, or start this shared group now and invite them later.'
+                : 'All of your friends are already in this shared plan.'}
+            </p>
+            {friends.length === 0 && onOpenFriends && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenFriends();
+                }}
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+              >
+                <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Find friends</span>
+              </button>
+            )}
           </div>
         ) : (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
-              <span>Choose friends from your Reading Circle</span>
+              <span>Choose friends to invite</span>
               <span className="tabular-nums">
                 {selectedUids.length} selected (up to {remainingSlots})
               </span>
@@ -214,6 +278,20 @@ export const ReadTogetherModal: React.FC<ReadTogetherModalProps> = ({
           >
             Cancel
           </button>
+          {!user && onOpenAccount && (
+            <motion.button
+              type="button"
+              whileTap={TACTILE_TAP}
+              transition={SPRING_TACTILE}
+              onClick={() => {
+                onClose();
+                onOpenAccount();
+              }}
+              className="btn-primary inline-flex min-h-9 items-center gap-1.5 rounded-md px-4 py-1.5 text-xs font-medium"
+            >
+              <span>Sign in</span>
+            </motion.button>
+          )}
           {user && (
             <motion.button
               type="button"

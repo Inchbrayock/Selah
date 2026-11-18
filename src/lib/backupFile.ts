@@ -23,7 +23,7 @@ export async function exportSanctuaryBackupFile(
     });
 
     await Share.share({
-      title: 'Selah Reading Ledger Backup',
+      title: 'Selah Reading Backup',
       text: 'Selah JSON backup file',
       url: uri,
       dialogTitle: 'Export Selah Backup',

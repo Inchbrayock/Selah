@@ -1,7 +1,7 @@
-import React from 'react';
-import { Eye, EyeOff, Search } from 'lucide-react';
+import React, { useState } from 'react';
+import { Eye, EyeOff, Search, ShieldOff } from 'lucide-react';
 import { sanitizeFriendPrivacy } from '../../lib/friends';
-import { useBibleStore } from '../../store/useBibleStore';
+import { useFriendsStore, useReadingData } from '../../store/useBibleStore';
 import type { FriendPrivacySettings } from '../../types/bible';
 
 const GRANULAR_TOGGLES: {
@@ -11,39 +11,42 @@ const GRANULAR_TOGGLES: {
 }[] = [
   {
     key: 'showBookProgress',
-    label: '66-book progress and chapter totals',
-    detail: 'Share Whole Bible, Old Testament, and New Testament chapter counts.',
+    label: 'Bible progress & chapter counts',
+    detail: 'Share Whole Bible, Old Testament, and New Testament chapter totals.',
   },
   {
     key: 'showStreak',
-    label: 'Reading streak and lamp status',
-    detail: 'Show whether your reading lamp is lit and your current day streak.',
+    label: 'Reading streak',
+    detail: 'Show your current day streak and whether you read recently.',
   },
   {
     key: 'showRecentBook',
-    label: 'Last read book and date',
-    detail: 'Show the most recent book name and calendar day you logged.',
+    label: 'Last read book & date',
+    detail: 'Show the most recent book name and date you logged.',
   },
   {
     key: 'showActivePlan',
     label: 'Active reading plan',
-    detail: 'Let friends see which guided reading plan you are currently following.',
+    detail: 'Let friends see which reading plan you are currently following.',
   },
   {
     key: 'showSealsCount',
-    label: 'Earned seals count',
-    detail: 'Show how many illuminated seals you have unlocked.',
+    label: 'Milestones unlocked',
+    detail: 'Show how many reading milestones you have unlocked.',
   },
   {
     key: 'showPhoto',
-    label: 'Profile photo',
-    detail: 'Display your chosen profile portrait instead of a monogram.',
+    label: 'Profile picture',
+    detail: 'Show your profile picture instead of your initials.',
   },
 ];
 
 export const FriendPrivacyPanel: React.FC = () => {
-  const { preferences, updatePreferences } = useBibleStore();
+  const { preferences, updatePreferences } = useReadingData();
+  const { blockedUsers, unblockFriend } = useFriendsStore();
   const privacy = sanitizeFriendPrivacy(preferences.friendPrivacy);
+  const [unblockingUid, setUnblockingUid] = useState<string | null>(null);
+  const [unblockError, setUnblockError] = useState<string | null>(null);
 
   const toggleSetting = (key: keyof FriendPrivacySettings, value: boolean) => {
     void updatePreferences({
@@ -52,6 +55,18 @@ export const FriendPrivacyPanel: React.FC = () => {
         [key]: value,
       },
     });
+  };
+
+  const handleUnblock = async (blockedUid: string) => {
+    setUnblockError(null);
+    setUnblockingUid(blockedUid);
+    try {
+      await unblockFriend(blockedUid);
+    } catch (err) {
+      setUnblockError(err instanceof Error ? err.message : 'Could not unblock user.');
+    } finally {
+      setUnblockingUid(null);
+    }
   };
 
   return (
@@ -65,11 +80,11 @@ export const FriendPrivacyPanel: React.FC = () => {
             id="friend-privacy-heading"
             className="font-display text-xl font-medium text-[var(--text-primary)]"
           >
-            Circle privacy
+            Friend privacy
           </h2>
           <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
-            Choose whether readers can find you in search and what accepted friends can view.
-            Personal study notes, reflection entries, and your email address are never shared.
+            Choose whether people can find you in search and what accepted friends can see.
+            Personal journal notes and your email address are never shared.
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">
@@ -109,10 +124,10 @@ export const FriendPrivacyPanel: React.FC = () => {
         <label className="flex cursor-pointer items-start justify-between gap-4 rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] p-3.5">
           <div>
             <span className="block text-sm font-medium text-[var(--text-primary)]">
-              Share reading summary with accepted friends
+              Share reading summary with friends
             </span>
             <span className="mt-0.5 block text-xs leading-relaxed text-[var(--text-secondary)]">
-              Turn off at any time to pause sharing without removing anyone from your circle.
+              Turn off at any time to pause sharing without removing any friends.
             </span>
           </div>
           <input
@@ -147,6 +162,54 @@ export const FriendPrivacyPanel: React.FC = () => {
             />
           </label>
         ))}
+      </div>
+
+      {/* Blocked Users Management */}
+      <div className="border-t border-[var(--border-subtle)] pt-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <ShieldOff className="h-3.5 w-3.5 text-[var(--text-secondary)]" aria-hidden="true" />
+            <h3 className="text-sm font-medium text-[var(--text-primary)]">
+              Blocked users{blockedUsers.length > 0 ? ` (${blockedUsers.length})` : ''}
+            </h3>
+          </div>
+        </div>
+
+        {blockedUsers.length === 0 ? (
+          <p className="mt-1.5 text-xs text-[var(--text-secondary)]">
+            No blocked users. Anyone you block will appear here so you can unblock them later.
+          </p>
+        ) : (
+          <ul className="mt-2.5 divide-y divide-[var(--border-subtle)] rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)]">
+            {blockedUsers.map((record) => {
+              const busy = unblockingUid === record.blockedUid;
+              return (
+                <li
+                  key={record.blockedUid}
+                  className="flex items-center justify-between gap-3 px-3.5 py-2.5"
+                >
+                  <span className="truncate text-sm font-medium text-[var(--text-primary)]">
+                    {record.displayName}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void handleUnblock(record.blockedUid)}
+                    className="min-h-8 shrink-0 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-1 text-xs font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] disabled:opacity-55"
+                  >
+                    {busy ? 'Unblocking…' : 'Unblock'}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {unblockError && (
+          <p role="alert" className="mt-2 text-xs font-medium text-[var(--color-crimson)]">
+            {unblockError}
+          </p>
+        )}
       </div>
     </section>
   );

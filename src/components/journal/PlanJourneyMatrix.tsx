@@ -92,11 +92,10 @@ export const PlanJourneyMatrix: React.FC<PlanJourneyMatrixProps> = ({
             id="journey-map-heading"
             className="font-display text-lg font-medium text-[var(--text-primary)] sm:text-xl"
           >
-            Journey Map
+            Progress Map
           </h2>
           <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
-            Select any {showAllStagesInline ? 'day' : 'stage or day'} to inspect its passages in
-            the itinerary below.
+            Select any {showAllStagesInline ? 'day' : 'stage or day'} to view its readings below.
           </p>
         </div>
 

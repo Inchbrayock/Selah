@@ -4,7 +4,7 @@ import { Check, Feather } from 'lucide-react';
 import { formatShortDate } from '../../lib/dates';
 import { getEncouragementPresetLabel } from '../../lib/fellowship';
 import { SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
-import { useBibleStore } from '../../store/useBibleStore';
+import { useFriendsStore } from '../../store/useBibleStore';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
 
 function formatNoteDate(sentAtIso: string): string {
@@ -20,7 +20,7 @@ function formatNoteDate(sentAtIso: string): string {
 }
 
 export const EncouragementSlipsPanel: React.FC = () => {
-  const { receivedEncouragements, acknowledgeQuietEncouragement } = useBibleStore();
+  const { receivedEncouragements, acknowledgeQuietEncouragement } = useFriendsStore();
   const [busySenderUid, setBusySenderUid] = useState<string | null>(null);
   const [showAcknowledged, setShowAcknowledged] = useState(false);
 
@@ -50,7 +50,7 @@ export const EncouragementSlipsPanel: React.FC = () => {
             id="quiet-encouragements-heading"
             className="font-display text-xl font-medium text-[var(--text-primary)]"
           >
-            Quiet notes
+            Encouragements
           </h2>
           {unacknowledged.length > 0 && (
             <span className="rounded-md bg-[var(--color-accent-soft)] px-2 py-0.5 text-xs font-medium text-[var(--color-accent)] tabular-nums">
@@ -65,15 +65,15 @@ export const EncouragementSlipsPanel: React.FC = () => {
             className="min-h-8 rounded-md px-2 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           >
             {showAcknowledged
-              ? 'Hide acknowledged notes'
-              : `Show recent notes (${acknowledged.length})`}
+              ? 'Hide read notes'
+              : `Show read notes (${acknowledged.length})`}
           </button>
         )}
       </div>
 
       {visible.length === 0 ? (
         <p className="mt-2 text-xs text-[var(--text-secondary)]">
-          All quiet notes from your Reading Circle have been acknowledged.
+          You’re all caught up on encouragements from friends.
         </p>
       ) : (
         <ul className="mt-4 divide-y divide-[var(--border-subtle)] rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)]">
@@ -111,7 +111,7 @@ export const EncouragementSlipsPanel: React.FC = () => {
                   {isAcked ? (
                     <span className="inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
                       <Check className="h-3.5 w-3.5 text-[var(--color-sage)]" aria-hidden="true" />
-                      <span>Acknowledged</span>
+                      <span>Read</span>
                     </span>
                   ) : (
                     <motion.button
@@ -123,7 +123,7 @@ export const EncouragementSlipsPanel: React.FC = () => {
                       className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--color-accent)] disabled:opacity-55"
                     >
                       <Check className="h-3.5 w-3.5 text-[var(--color-sage)]" aria-hidden="true" />
-                      <span>{busy ? 'Saving…' : 'Acknowledge'}</span>
+                      <span>{busy ? 'Saving…' : 'Mark read'}</span>
                     </motion.button>
                   )}
                 </div>

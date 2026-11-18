@@ -47,7 +47,7 @@ interface PlanFinderViewProps {
 }
 
 const SCOPE_OPTIONS: { id: 'all' | ReadingPlanCategory; label: string }[] = [
-  { id: 'all', label: 'All scopes' },
+  { id: 'all', label: 'All sections' },
   { id: 'whole-bible', label: 'Whole Bible' },
   { id: 'old-testament', label: 'Old Testament' },
   { id: 'new-testament', label: 'New Testament' },
@@ -72,7 +72,7 @@ const QUICK_GOALS: QuickGoalPreset[] = [
   },
   {
     id: 'short-month',
-    label: '1-month path',
+    label: '1-month plan',
     patch: { category: 'all', length: 'short', pace: 'all', query: '', sortBy: 'shortest' },
   },
   {
@@ -157,8 +157,8 @@ export const PlanFinderView: React.FC<PlanFinderViewProps> = ({
               </h2>
             </div>
             <p className="mt-1.5 max-w-[66ch] text-sm text-[var(--text-secondary)]">
-              Search {plans.length} curated and custom reading paths by Scripture focus, length,
-              daily chapter pace, or any book you want to read next.
+              Browse {plans.length} curated and custom reading plans by section, length, daily pace,
+              or any book you want to read next.
             </p>
           </div>
 

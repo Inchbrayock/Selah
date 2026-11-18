@@ -366,12 +366,12 @@ export const CustomPlanBuilder: React.FC<CustomPlanBuilderProps> = ({
 
           <div className="lg:col-span-3">
             <span className="block text-xs font-medium text-[var(--text-secondary)]">
-              Ribbon color
+              Accent color
             </span>
             <div
               role="radiogroup"
-              aria-label="Choose plan ribbon color"
-              className="mt-2 flex flex-wrap items-center gap-2"
+              aria-label="Choose plan color"
+              className="mt-2 grid w-fit grid-cols-4 gap-2 sm:grid-cols-8 lg:grid-cols-4"
             >
               {PLAN_ACCENT_OPTIONS.map((opt) => {
                 const selected = accentColor === opt.value;
@@ -534,7 +534,7 @@ export const CustomPlanBuilder: React.FC<CustomPlanBuilderProps> = ({
                   onClick={sortCanonical}
                   className="text-xs font-medium text-[var(--color-accent)] hover:underline"
                 >
-                  Sort canonically
+                  Sort Genesis–Revelation
                 </button>
               )}
             </div>

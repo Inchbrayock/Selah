@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountUser } from '../lib/auth';
 import type {
+  BlockedFriendRecord,
   CustomPlanDefinition,
   FriendProfile,
   FriendshipRecord,
@@ -48,6 +49,8 @@ const friendsMocks = vi.hoisted(() => ({
   searchReaderDirectory: vi.fn().mockResolvedValue([]),
   fetchSuggestedReaders: vi.fn().mockResolvedValue([]),
   fetchBlockedUids: vi.fn().mockResolvedValue([]),
+  fetchBlockedUsers: vi.fn().mockResolvedValue([] as BlockedFriendRecord[]),
+  unblockUser: vi.fn().mockResolvedValue(undefined),
   sendFriendRequest: vi.fn(),
   acceptFriendRequest: vi.fn().mockResolvedValue(undefined),
   deleteFriendship: vi.fn().mockResolvedValue(undefined),
@@ -101,6 +104,8 @@ vi.mock('../db/friendsSync', () => ({
   searchReaderDirectory: (...args: unknown[]) => friendsMocks.searchReaderDirectory(...args),
   fetchSuggestedReaders: (...args: unknown[]) => friendsMocks.fetchSuggestedReaders(...args),
   fetchBlockedUids: (...args: unknown[]) => friendsMocks.fetchBlockedUids(...args),
+  fetchBlockedUsers: (...args: unknown[]) => friendsMocks.fetchBlockedUsers(...args),
+  unblockUser: (...args: unknown[]) => friendsMocks.unblockUser(...args),
   sendFriendRequest: (...args: unknown[]) => friendsMocks.sendFriendRequest(...args),
   acceptFriendRequest: (...args: unknown[]) => friendsMocks.acceptFriendRequest(...args),
   deleteFriendship: (...args: unknown[]) => friendsMocks.deleteFriendship(...args),
@@ -222,7 +227,17 @@ function emitAuth(user: AccountUser | null) {
   }
 }
 
-describe('Reading Circle UI and social friend discovery workflows', () => {
+async function openFriendsFromAccountMenu() {
+  const accountBtn = await screen.findByRole('button', {
+    name: /Open profile menu|Sign in or open account menu/i,
+  });
+  fireEvent.click(accountBtn);
+  const popover = await screen.findByTestId('account-popover');
+  fireEvent.click(within(popover).getByRole('button', { name: /Friends/i }));
+  expect(await screen.findByRole('heading', { level: 1, name: /^Friends$/i })).toBeInTheDocument();
+}
+
+describe('Friends hub UI and social discovery workflows', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
@@ -248,19 +263,22 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
     friendsMocks.fetchSuggestedReaders.mockResolvedValue([]);
     friendsMocks.searchReaderDirectory.mockResolvedValue([]);
     friendsMocks.fetchBlockedUids.mockResolvedValue([]);
+    friendsMocks.fetchBlockedUsers.mockResolvedValue([]);
     friendsMocks.checkUsernameAvailability.mockResolvedValue({
       available: true,
       normalized: 'hannah.reads',
     });
   });
 
-  it('opens Reading Circle while signed out without friend codes and preserves the 4 primary tabs', async () => {
+  it('opens Friends via the account menu while signed out, has no standalone header Friends icon, and keeps 4 primary tabs', async () => {
     render(<App />);
 
-    const friendsButton = await screen.findByRole('button', { name: 'Open Reading Circle' });
-    fireEvent.click(friendsButton);
+    // No standalone Friends button in the top bar
+    const header = document.querySelector('header')!;
+    expect(within(header).queryByRole('button', { name: /Reading Circle|Friends/i })).not.toBeInTheDocument();
 
-    expect(await screen.findByRole('heading', { name: 'Reading Circle' })).toBeInTheDocument();
+    await openFriendsFromAccountMenu();
+
     expect(screen.getByRole('heading', { name: 'Sign in to read alongside friends' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in to connect' })).toBeInTheDocument();
     expect(screen.queryByText(/friend code/i)).not.toBeInTheDocument();
@@ -269,7 +287,7 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
     expect(navButtons).toHaveLength(4);
   });
 
-  it('searches readers live by name or @username, sends an inline Add friend request, and manages @username in Settings', async () => {
+  it('shows own @username with copy & inline edit in Friends, searches without random strangers, and manages username in Settings', async () => {
     friendsMocks.fetchSuggestedReaders.mockResolvedValue([RUTH_ENTRY]);
     friendsMocks.searchReaderDirectory.mockResolvedValue([RUTH_ENTRY]);
     friendsMocks.sendFriendRequest.mockResolvedValue({ outcome: 'sent' });
@@ -285,21 +303,20 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
       expect(friendsMocks.subscribeFriendships).toHaveBeenCalled();
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open Reading Circle' }));
+    await openFriendsFromAccountMenu();
 
-    // Own @handle is hidden on the Friends page alongside username editing and privacy controls
-    expect(screen.queryByText('@hannah')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /@hannah/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Privacy/i })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Your @username')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Share invite link/i)).not.toBeInTheDocument();
+    // Own profile bar exposes @hannah, Copy button, Edit username, and Privacy right in Friends
+    expect(await screen.findByText('@hannah')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Copy @hannah/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Edit username/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Privacy/i })).toBeInTheDocument();
 
-    // Suggested readers ("People you may know") appear before searching
-    expect(await screen.findByText('People you may know')).toBeInTheDocument();
-    expect(screen.getByText('Ruth Chen')).toBeInTheDocument();
-    expect(screen.getByText('@ruth.chen')).toBeInTheDocument();
+    // Switch to Find & Requests sub-tab: NO random global strangers ("People you may know")
+    fireEvent.click(screen.getByRole('tab', { name: /Find & Requests/i }));
+    expect(screen.queryByText('People you may know')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ruth Chen')).not.toBeInTheDocument();
 
-    // Live search by name or @username
+    // Live search by name or @username finds Ruth Chen
     const searchInput = screen.getByRole('searchbox', {
       name: /Search people by name or @username/i,
     });
@@ -365,20 +382,9 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
       expect(friendsMocks.deleteFriendship).toHaveBeenCalledWith('uid_hannah_uid_ruth');
     });
 
-    // Navigate to Settings -> Change username directly inside the Cloud account card (not in Privacy)
-    fireEvent.click(screen.getByRole('button', { name: /Open account and cloud sync/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /Settings/i }, { timeout: 3000 }));
-    const accountCard = (
-      await screen.findByRole('heading', { level: 2, name: /Hannah/i })
-    ).closest('section')!;
-    const privacyCard = (
-      await screen.findByRole('heading', { level: 2, name: /Circle privacy/i })
-    ).closest('section')!;
-    expect(within(accountCard).getByText('@hannah')).toBeInTheDocument();
-    expect(within(privacyCard).queryByLabelText('Your @username')).not.toBeInTheDocument();
-
-    fireEvent.click(within(accountCard).getByRole('button', { name: /Change username/i }));
-    const handleInput = await within(accountCard).findByLabelText('Your @username');
+    // Inline username edit directly inside Friends -> updates to @hannah.reads
+    fireEvent.click(screen.getByRole('button', { name: /Edit username/i }));
+    const handleInput = await screen.findByLabelText('Your @username');
     expect(handleInput).toHaveValue('hannah');
     fireEvent.change(handleInput, { target: { value: 'hannah.reads' } });
 
@@ -390,7 +396,7 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
     });
     expect(await screen.findByText('@hannah.reads is available')).toBeInTheDocument();
 
-    fireEvent.click(within(accountCard).getByRole('button', { name: 'Save username' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save username' }));
     await waitFor(() => {
       expect(friendsMocks.claimCustomUsername).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -399,11 +405,11 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
         })
       );
     });
-    expect(await within(accountCard).findByText('Username saved as @hannah.reads')).toBeInTheDocument();
-    expect(within(accountCard).getByText('@hannah.reads')).toBeInTheDocument();
+    expect(await screen.findByText('Username saved as @hannah.reads')).toBeInTheDocument();
+    expect(screen.getByText('@hannah.reads')).toBeInTheDocument();
   });
 
-  it('handles incoming/outgoing requests, inspects Friend Folio & MiniCanonicalSpine, and toggles search privacy in Settings', async () => {
+  it('shows unified profile badge, handles requests, inspects Friend details, and toggles privacy in Friends & Settings', async () => {
     const incomingFromMiriam: FriendshipRecord = {
       id: 'uid_hannah_uid_miriam',
       users: ['uid_hannah', 'uid_miriam'],
@@ -449,13 +455,17 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
       friendsSyncState.onFriendshipsCb?.([incomingFromMiriam, outgoingToLuke], false);
     });
 
-    const dashboardStrip = await screen.findByRole('region', { name: 'Reading Circle summary' });
-    expect(dashboardStrip).toHaveTextContent('1 incoming request');
-    expect(
-      screen.getByRole('button', { name: 'Open Reading Circle (1 pending request)' })
-    ).toBeInTheDocument();
+    // Unified profile attention badge reflects the incoming request
+    expect(await screen.findByTestId('profile-attention-badge')).toHaveTextContent('1');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open Reading Circle' }));
+    const dashboardStrip = await screen.findByRole('region', { name: 'Friends summary' });
+    expect(dashboardStrip).toHaveTextContent('1 request');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Friends' }));
+    expect(await screen.findByRole('heading', { level: 1, name: /^Friends$/i })).toBeInTheDocument();
+
+    // Pending request callout banner lets user jump straight to Find & Requests
+    fireEvent.click(screen.getByRole('button', { name: /1 pending friend request/i }));
 
     expect(await screen.findByText('Miriam')).toBeInTheDocument();
     expect(screen.getByText('@miriam')).toBeInTheDocument();
@@ -496,6 +506,9 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
       friendsSyncState.profileCallbacks.get('uid_miriam')?.(MIRIAM_PROFILE);
     });
 
+    // Switch back to Friends tab to view Miriam
+    fireEvent.click(screen.getByRole('tab', { name: /^Friends/i }));
+
     expect(await screen.findByText('1 friend connected')).toBeInTheDocument();
     expect(screen.getByText(/7 days streak/i)).toBeInTheDocument();
 
@@ -505,7 +518,7 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
     expect(dialog).toHaveTextContent('@miriam');
     expect(dialog).toHaveTextContent('54 / 1,189 ch');
     expect(dialog).toHaveTextContent('1 of 66 books completed');
-    expect(dialog).toHaveTextContent('5 earned');
+    expect(dialog).toHaveTextContent('5 unlocked');
 
     const genesisSpineBtn = screen.getByRole('button', { name: 'Genesis: 50 of 50 chapters' });
     fireEvent.focus(genesisSpineBtn);
@@ -517,9 +530,10 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
       expect(friendsMocks.deleteFriendship).toHaveBeenCalledWith('uid_hannah_uid_miriam');
     });
 
-    // Navigate to Settings -> Toggle Circle privacy (both people search discoverability & reading metrics)
-    fireEvent.click(screen.getByRole('button', { name: /Open account and cloud sync/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /Settings/i }, { timeout: 3000 }));
+    // Navigate to Settings -> Toggle Friend privacy (both search & reading metrics)
+    fireEvent.click(screen.getByRole('button', { name: /Open profile menu/i }));
+    const popover = await screen.findByTestId('account-popover');
+    fireEvent.click(within(popover).getByRole('button', { name: /Settings/i }));
     const discoverableCheckbox = await screen.findByRole('checkbox', {
       name: /Appear in people search/i,
     });
@@ -538,7 +552,7 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
     });
 
     const progressCheckbox = screen.getByRole('checkbox', {
-      name: /66-book progress and chapter totals/i,
+      name: /Bible progress & chapter counts/i,
     });
     fireEvent.click(progressCheckbox);
 
@@ -554,7 +568,7 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
     });
   });
 
-  it('blocks an incoming requester via inline confirmation and navigates from Settings', async () => {
+  it('blocks an incoming requester and allows unblocking from Privacy panel', async () => {
     const incomingSpam: FriendshipRecord = {
       id: 'uid_hannah_uid_stranger',
       users: ['uid_hannah', 'uid_stranger'],
@@ -583,12 +597,8 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
       friendsSyncState.onFriendshipsCb?.([incomingSpam], false);
     });
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Open Reading Circle (1 pending request)' })
-    );
-    expect(
-      await screen.findByRole('heading', { name: 'Reading Circle' }, { timeout: 3000 })
-    ).toBeInTheDocument();
+    await openFriendsFromAccountMenu();
+    fireEvent.click(screen.getByRole('tab', { name: /Find & Requests/i }));
 
     const requestBlockButton = await screen.findByRole(
       'button',
@@ -607,17 +617,18 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
       });
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Open account and cloud sync/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /Settings/i }, { timeout: 3000 }));
-    const circleLink = await screen.findByRole(
-      'button',
-      { name: /Open Reading Circle/i },
-      { timeout: 3000 }
-    );
-    fireEvent.click(circleLink);
-    expect(
-      await screen.findByRole('heading', { name: 'Reading Circle' }, { timeout: 3000 })
-    ).toBeInTheDocument();
+    // Open inline Privacy panel inside Friends -> Blocked users shows Stranger with Unblock button
+    const privacyBtn = await screen.findByRole('button', { name: /Privacy \(1 blocked\)/i });
+    fireEvent.click(privacyBtn);
+
+    expect(await screen.findByText('Blocked users (1)')).toBeInTheDocument();
+    const unblockBtn = screen.getByRole('button', { name: 'Unblock' });
+    fireEvent.click(unblockBtn);
+
+    await waitFor(() => {
+      expect(friendsMocks.unblockUser).toHaveBeenCalledWith('uid_hannah', 'uid_stranger');
+    });
+    expect(await screen.findByText(/No blocked users/i)).toBeInTheDocument();
   });
 
   it('renders interactive MiniCanonicalSpine for 66 books', () => {
@@ -663,8 +674,7 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
       expect(friendsMocks.subscribeFriendships).toHaveBeenCalled();
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open Reading Circle' }));
-    expect(await screen.findByRole('heading', { name: 'Reading Circle' })).toBeInTheDocument();
+    await openFriendsFromAccountMenu();
 
     await act(async () => {
       resolveLateCache({
@@ -677,15 +687,15 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
     });
 
     expect(
-      screen.queryByText(/Offline — showing your last synced Reading Circle snapshot/i)
+      screen.queryByText(/Offline — showing your last synced friends snapshot/i)
     ).not.toBeInTheDocument();
-    expect(screen.getByText('No friends connected yet')).toBeInTheDocument();
+    expect(screen.getByText('No friends added yet')).toBeInTheDocument();
 
     await act(async () => {
       friendsSyncState.onFriendshipsCb?.([cachedMiriam], true);
     });
     expect(
-      await screen.findByText(/Offline — showing your last synced Reading Circle snapshot/i)
+      await screen.findByText(/Offline — showing your last synced friends snapshot/i)
     ).toBeInTheDocument();
 
     await act(async () => {
@@ -693,7 +703,7 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
     });
     await waitFor(() => {
       expect(
-        screen.queryByText(/Offline — showing your last synced Reading Circle snapshot/i)
+        screen.queryByText(/Offline — showing your last synced friends snapshot/i)
       ).not.toBeInTheDocument();
     });
     expect(screen.getByText('1 friend connected')).toBeInTheDocument();
@@ -707,7 +717,7 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
       expect(friendsMocks.subscribeFriendships).toHaveBeenCalledTimes(1);
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open Reading Circle' }));
+    await openFriendsFromAccountMenu();
 
     await act(async () => {
       friendsSyncState.onFriendshipsErrCb?.(new Error('Transient connection lost'));
@@ -725,15 +735,34 @@ describe('Reading Circle UI and social friend discovery workflows', () => {
     });
   });
 
-  it('transitions signed-out to signed-in smoothly and shows @username in Account popover', async () => {
+  it('transitions signed-out to signed-in smoothly, shows @username & Friends row in Account popover, and skips redundant directory writes on chapter log', async () => {
     render(<App />);
 
     await act(async () => {
       emitAuth(HANNAH);
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Open account and cloud sync/i }));
+    await waitFor(() => {
+      expect(friendsMocks.ensureOwnFriendProfile).toHaveBeenCalled();
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Open profile menu/i }));
     const popover = await screen.findByTestId('account-popover');
     expect(within(popover).getByText('@hannah')).toBeInTheDocument();
+    expect(within(popover).getByRole('button', { name: /Friends/i })).toBeInTheDocument();
+
+    // Close menu and log a chapter -> publishOwnFriendStats should be called with syncDirectory: false
+    fireEvent.click(within(popover).getByRole('button', { name: /Close account menu/i }));
+    friendsMocks.publishOwnFriendStats.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /Quick Log: John 1/i }));
+
+    await waitFor(
+      () => {
+        expect(friendsMocks.publishOwnFriendStats).toHaveBeenCalledWith(
+          expect.objectContaining({ syncDirectory: false })
+        );
+      },
+      { timeout: 3000 }
+    );
   });
 });

@@ -14,10 +14,10 @@ interface AchievementModalProps {
 }
 
 const TIER_LABELS: Record<string, string> = {
-  bronze: 'Bronze seal',
-  silver: 'Silver seal',
-  gold: 'Gold seal',
-  luminous: 'Luminous seal',
+  bronze: 'Bronze milestone',
+  silver: 'Silver milestone',
+  gold: 'Gold milestone',
+  luminous: 'Master milestone',
 };
 
 function clamp(v: number, min: number, max: number): number {
@@ -75,7 +75,7 @@ export const AchievementModal: React.FC<AchievementModalProps> = ({
             type="button"
             whileTap={TACTILE_PILL_TAP}
             onClick={onClose}
-            aria-label="Close seal details"
+            aria-label="Close milestone details"
             className="absolute right-4 top-4 inline-flex min-h-10 min-w-10 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] sm:min-h-9 sm:min-w-9"
           >
             <X className="h-4 w-4" aria-hidden="true" />
@@ -88,7 +88,7 @@ export const AchievementModal: React.FC<AchievementModalProps> = ({
               transition={{ duration: 0.25, ease: FOLIO_EASE }}
               className="mb-3 text-center text-xs font-medium text-[var(--color-accent)]"
             >
-              New seal unlocked
+              New milestone unlocked
             </motion.p>
           )}
 
@@ -221,7 +221,7 @@ export const AchievementModal: React.FC<AchievementModalProps> = ({
               </span>
               {achievement.definition.bonus && (
                 <span className="inline-flex items-center rounded-md border border-[var(--border-subtle)] bg-[var(--color-sage-soft)] px-2.5 py-1 text-xs font-medium text-[var(--color-sage)]">
-                  Optional Fellowship Seal
+                  Optional Friend Milestone
                 </span>
               )}
             </div>
@@ -231,12 +231,12 @@ export const AchievementModal: React.FC<AchievementModalProps> = ({
               className="mt-3 font-display text-2xl font-medium tracking-tight text-[var(--text-primary)]"
             >
               {achievement.definition.secret && !achievement.unlocked
-                ? 'Hidden Sanctuary Seal'
+                ? 'Hidden Milestone'
                 : achievement.definition.title}
             </h2>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
               {achievement.definition.secret && !achievement.unlocked
-                ? 'Continue exploring Scripture faithfully to reveal this seal.'
+                ? 'Keep reading the Bible to discover this milestone.'
                 : achievement.definition.subtitle}
             </p>
           </motion.div>
@@ -248,7 +248,7 @@ export const AchievementModal: React.FC<AchievementModalProps> = ({
           >
             <p className="mt-4 text-center text-sm leading-relaxed text-[var(--text-primary)]">
               {achievement.definition.secret && !achievement.unlocked
-                ? 'This is a secret milestone waiting in the pages of the Word.'
+                ? 'This is a hidden milestone waiting to be discovered as you read.'
                 : achievement.definition.description}
             </p>
 

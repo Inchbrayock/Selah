@@ -159,15 +159,14 @@ export const BOOKS_BY_ID: Record<string, CanonBook> = Object.fromEntries(
   BIBLE_BOOKS.map((book) => [book.id, book])
 );
 
+export const OT_BOOKS: CanonBook[] = BIBLE_BOOKS.filter((b) => b.testament === 'OT');
+export const NT_BOOKS: CanonBook[] = BIBLE_BOOKS.filter((b) => b.testament === 'NT');
+
 export const TOTAL_CANON_CHAPTERS = BIBLE_BOOKS.reduce(
   (sum, book) => sum + book.chapterCount,
   0
 );
 
-export const OT_TOTAL_CHAPTERS = BIBLE_BOOKS.filter(
-  (b) => b.testament === 'OT'
-).reduce((sum, b) => sum + b.chapterCount, 0);
+export const OT_TOTAL_CHAPTERS = OT_BOOKS.reduce((sum, b) => sum + b.chapterCount, 0);
 
-export const NT_TOTAL_CHAPTERS = BIBLE_BOOKS.filter(
-  (b) => b.testament === 'NT'
-).reduce((sum, b) => sum + b.chapterCount, 0);
+export const NT_TOTAL_CHAPTERS = NT_BOOKS.reduce((sum, b) => sum + b.chapterCount, 0);

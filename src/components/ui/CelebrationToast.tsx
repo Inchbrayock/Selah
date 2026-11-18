@@ -62,7 +62,7 @@ export const CelebrationToast: React.FC<CelebrationToastProps> = ({
               />
             </motion.div>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-medium text-[var(--color-accent)]">Seal unlocked</p>
+              <p className="text-xs font-medium text-[var(--color-accent)]">Milestone unlocked</p>
               <p className="truncate font-display text-base font-medium text-[var(--text-primary)]">
                 {item.definition.title}
               </p>
@@ -74,7 +74,7 @@ export const CelebrationToast: React.FC<CelebrationToastProps> = ({
                 }}
                 className="tactile-press mt-0.5 text-xs font-medium text-[var(--color-sage)] underline-offset-2 hover:underline"
               >
-                Inspect seal
+                View details
               </button>
             </div>
             <motion.button

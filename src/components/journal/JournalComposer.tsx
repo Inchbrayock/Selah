@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { BookOpen, Plus, X } from 'lucide-react';
-import { BIBLE_BOOKS, BOOKS_BY_ID } from '../../data/bibleCanon';
+import { NT_BOOKS, OT_BOOKS } from '../../data/bibleCanon';
 import { todayPlainDate } from '../../lib/dates';
-import { FOLIO_EASE, SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
-import { parseChapterInput } from '../../lib/progress';
-import { useBibleStore } from '../../store/useBibleStore';
+import { FOLIO_EASE } from '../../lib/motion';
+import { useReadingData } from '../../store/useBibleStore';
+import { useReadingLogForm } from '../shared/useReadingLogForm';
 
 interface JournalComposerProps {
   onClose: () => void;
@@ -13,49 +13,30 @@ interface JournalComposerProps {
 }
 
 export const JournalComposer: React.FC<JournalComposerProps> = ({ onClose, onSaved }) => {
-  const { summary, preferences, allPlans, logChapters } = useBibleStore();
+  const { summary, preferences, allPlans, logChapters } = useReadingData();
+  const {
+    bookId,
+    selectBook,
+    chaptersText,
+    setChaptersText,
+    readDate,
+    setReadDate,
+    note,
+    setNote,
+    error,
+    setError,
+    selectedBook,
+    nextChapter,
+    parseAndValidateChapters,
+  } = useReadingLogForm(summary);
 
-  const defaultBookId = useMemo(() => {
-    if (summary.lastReadBookId) {
-      const last = summary.bookProgressById[summary.lastReadBookId];
-      if (last && last.nextUnreadChapter !== null) {
-        return last.book.id;
-      }
-    }
-    const inProgress = BIBLE_BOOKS.find((b) => {
-      const p = summary.bookProgressById[b.id];
-      return p && p.readChapters > 0 && !p.completed;
-    });
-    return inProgress?.id ?? 'john';
-  }, [summary]);
-
-  const [bookId, setBookId] = useState<string>(defaultBookId);
-  const [chaptersText, setChaptersText] = useState('');
-  const [readDate, setReadDate] = useState(() => todayPlainDate());
-  const [note, setNote] = useState('');
   const [planId, setPlanId] = useState<string>('');
-  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-
-  const selectedBook = BOOKS_BY_ID[bookId] ?? BIBLE_BOOKS[0];
-  const selectedProgress = summary.bookProgressById[selectedBook.id];
-  const nextChapter = selectedProgress?.nextUnreadChapter ?? 1;
-
-  const otBooks = useMemo(() => BIBLE_BOOKS.filter((b) => b.testament === 'OT'), []);
-  const ntBooks = useMemo(() => BIBLE_BOOKS.filter((b) => b.testament === 'NT'), []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-
-    const expr = chaptersText.trim() || String(nextChapter);
-    const parsed = parseChapterInput(expr, selectedBook.chapterCount);
-    if (parsed.length === 0) {
-      setError(
-        `Enter chapter numbers between 1 and ${selectedBook.chapterCount} (for example, 1-3 or 5).`
-      );
-      return;
-    }
+    const parsed = parseAndValidateChapters();
+    if (!parsed) return;
 
     setSaving(true);
     try {
@@ -91,7 +72,7 @@ export const JournalComposer: React.FC<JournalComposerProps> = ({ onClose, onSav
             id="journal-composer-heading"
             className="font-display text-xl font-medium text-[var(--text-primary)]"
           >
-            Record a reading entry
+            Add a reading entry
           </h2>
           <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
             {selectedBook.name}: {selectedBook.theme}
@@ -119,21 +100,18 @@ export const JournalComposer: React.FC<JournalComposerProps> = ({ onClose, onSav
             <select
               id="journal-composer-book"
               value={bookId}
-              onChange={(e) => {
-                setBookId(e.target.value);
-                setError(null);
-              }}
+              onChange={(e) => selectBook(e.target.value)}
               className="folio-input mt-1.5 min-h-11 w-full px-3 py-2 text-base font-medium sm:min-h-10 sm:text-sm"
             >
               <optgroup label="Old Testament">
-                {otBooks.map((b) => (
+                {OT_BOOKS.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name} ({b.chapterCount} ch)
                   </option>
                 ))}
               </optgroup>
               <optgroup label="New Testament">
-                {ntBooks.map((b) => (
+                {NT_BOOKS.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name} ({b.chapterCount} ch)
                   </option>
@@ -192,7 +170,7 @@ export const JournalComposer: React.FC<JournalComposerProps> = ({ onClose, onSav
             htmlFor="journal-composer-note"
             className="block text-xs font-medium text-[var(--text-secondary)]"
           >
-            Reflection note (optional)
+            Note (optional)
           </label>
           <textarea
             id="journal-composer-note"
@@ -200,7 +178,7 @@ export const JournalComposer: React.FC<JournalComposerProps> = ({ onClose, onSav
             maxLength={2000}
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Write what stood out in this passage, a verse to carry, or a prayer…"
+            placeholder="Write what stood out in this passage, a key verse, or a prayer…"
             className="folio-input mt-1.5 w-full resize-y px-3 py-2.5 font-display text-base leading-relaxed placeholder:font-sans placeholder:text-sm placeholder:text-[var(--text-secondary)] sm:text-[1.02rem]"
           />
         </div>
@@ -217,7 +195,7 @@ export const JournalComposer: React.FC<JournalComposerProps> = ({ onClose, onSav
               onChange={(e) => setPlanId(e.target.value)}
               className="folio-input min-h-10 px-2.5 py-1.5 text-base sm:min-h-9 sm:text-xs"
             >
-              <option value="">Freeform reading</option>
+              <option value="">Free reading</option>
               {allPlans.map((plan) => (
                 <option key={plan.id} value={plan.id}>
                   Plan: {plan.title}
@@ -236,16 +214,14 @@ export const JournalComposer: React.FC<JournalComposerProps> = ({ onClose, onSav
             >
               Cancel
             </button>
-            <motion.button
+            <button
               type="submit"
               disabled={saving}
-              whileTap={TACTILE_TAP}
-              transition={SPRING_TACTILE}
-              className="btn-sage inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-xs font-medium transition-opacity hover:opacity-90 disabled:opacity-60 sm:min-h-9 sm:py-1.5"
+              className="tactile-press btn-sage inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-xs font-medium transition-opacity hover:opacity-90 disabled:opacity-60 sm:min-h-9 sm:py-1.5"
             >
               <Plus className="h-3.5 w-3.5" aria-hidden="true" />
               <span>{saving ? 'Saving…' : 'Save entry'}</span>
-            </motion.button>
+            </button>
           </div>
         </div>
 

@@ -1,7 +1,14 @@
 import '@testing-library/jest-dom';
 import { configure } from '@testing-library/react';
+import { afterEach } from 'vitest';
 
 configure({ asyncUtilTimeout: 4000 });
+
+afterEach(() => {
+  if (typeof window !== 'undefined' && window.location.hash) {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+});
 
 if (typeof window !== 'undefined') {
   if (!window.matchMedia) {

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { BIBLE_BOOKS, DIVISIONS, DIVISION_META_BY_ID } from '../../data/bibleCanon';
+import { DIVISIONS, DIVISION_META_BY_ID, NT_BOOKS, OT_BOOKS } from '../../data/bibleCanon';
 import { decodeBookProgressSpec } from '../../lib/friends';
 import type { CanonBook } from '../../types/bible';
 
@@ -10,7 +10,7 @@ interface MiniCanonicalSpineProps {
 }
 
 /**
- * Compact 66-book proportional canonical ribbon mirroring CanonicalSpineBar
+ * Compact 66-book proportional progress ribbon mirroring CanonicalSpineBar
  * in Selah's mineral division pigments.
  */
 export const MiniCanonicalSpine: React.FC<MiniCanonicalSpineProps> = ({
@@ -20,9 +20,6 @@ export const MiniCanonicalSpine: React.FC<MiniCanonicalSpineProps> = ({
 }) => {
   const countsByBook = useMemo(() => decodeBookProgressSpec(bookProgressSpec), [bookProgressSpec]);
   const [hoveredBook, setHoveredBook] = useState<CanonBook | null>(null);
-
-  const otBooks = useMemo(() => BIBLE_BOOKS.filter((b) => b.testament === 'OT'), []);
-  const ntBooks = useMemo(() => BIBLE_BOOKS.filter((b) => b.testament === 'NT'), []);
 
   const totalRead = useMemo(
     () => Object.values(countsByBook).reduce((sum, count) => sum + count, 0),
@@ -102,7 +99,7 @@ export const MiniCanonicalSpine: React.FC<MiniCanonicalSpineProps> = ({
             </span>
           ) : (
             <span className="text-[var(--text-secondary)]">
-              Select or hover any book spine to inspect progress
+              Hover or tap any book to inspect progress
             </span>
           )}
         </div>
@@ -113,24 +110,24 @@ export const MiniCanonicalSpine: React.FC<MiniCanonicalSpineProps> = ({
         aria-label={
           interactive
             ? undefined
-            : `66-book reading spine: ${totalRead.toLocaleString()} of 1,189 chapters read`
+            : `66-book reading bar: ${totalRead.toLocaleString()} of 1,189 chapters read`
         }
         className="flex flex-col gap-1 sm:flex-row sm:items-end sm:gap-2"
       >
-        <div className="flex flex-[929_1_0%] items-end gap-[1px]">{renderGroup(otBooks)}</div>
-        <div className="flex flex-[260_1_0%] items-end gap-[1px]">{renderGroup(ntBooks)}</div>
+        <div className="flex flex-[929_1_0%] items-end gap-[1px]">{renderGroup(OT_BOOKS)}</div>
+        <div className="flex flex-[260_1_0%] items-end gap-[1px]">{renderGroup(NT_BOOKS)}</div>
       </div>
 
       {interactive && (
-        <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5 text-[0.7rem] text-[var(--text-secondary)]">
+        <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[0.7rem] text-[var(--text-secondary)] sm:grid-cols-4">
           {DIVISIONS.map((div) => (
             <span key={div.id} className="inline-flex items-center gap-1.5">
               <span
                 aria-hidden="true"
-                className="h-2 w-2 rounded-xs"
+                className="h-2 w-2 shrink-0 rounded-xs"
                 style={{ backgroundColor: div.colorVar }}
               />
-              <span>{div.shortLabel}</span>
+              <span className="truncate">{div.shortLabel}</span>
             </span>
           ))}
         </div>

@@ -11,8 +11,8 @@ import {
 } from '../../lib/journal';
 import { indexReadingLogForSearch } from '../../lib/logSearch';
 import { FOLIO_EASE, SPRING_TACTILE, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
-import { useBibleStore } from '../../store/useBibleStore';
-import type { BibleDivision } from '../../types/bible';
+import { useReadingData } from '../../store/useBibleStore';
+import type { BibleDivision, ReadingPlan } from '../../types/bible';
 import { JournalComposer } from './JournalComposer';
 import { JournalEntryRow } from './JournalEntryRow';
 import { PlansView } from './PlansView';
@@ -20,13 +20,17 @@ import { PlansView } from './PlansView';
 interface JournalViewProps {
   onOpenBook: (bookId: string) => void;
   initialSubTab?: 'journal' | 'plans';
+  onOpenAccount?: () => void;
+  onOpenFriends?: () => void;
 }
 
 export const JournalView: React.FC<JournalViewProps> = ({
   onOpenBook,
   initialSubTab = 'journal',
+  onOpenAccount,
+  onOpenFriends,
 }) => {
-  const { logs, editLog, removeLog, activateReadingPlan } = useBibleStore();
+  const { logs, allPlans, editLog, removeLog, activateReadingPlan } = useReadingData();
   const [subTab, setSubTab] = useState<'journal' | 'plans'>(initialSubTab);
   const [search, setSearch] = useState('');
   const [lens, setLens] = useState<JournalLens>('all');
@@ -34,6 +38,14 @@ export const JournalView: React.FC<JournalViewProps> = ({
   const [composerOpen, setComposerOpen] = useState(false);
 
   const todayIso = todayPlainDate();
+
+  const plansById = useMemo(() => {
+    const map = new Map<string, ReadingPlan>();
+    for (const plan of allPlans) {
+      map.set(plan.id, plan);
+    }
+    return map;
+  }, [allPlans]);
 
   useEffect(() => {
     setSubTab(initialSubTab);
@@ -103,14 +115,14 @@ export const JournalView: React.FC<JournalViewProps> = ({
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:flex-wrap sm:items-end">
           <div>
             <h1 className="font-display text-2xl font-medium tracking-tight text-[var(--text-primary)] sm:text-[2.15rem]">
-              {subTab === 'journal' ? 'Reading Journal' : 'Guided Reading Plans'}
+              {subTab === 'journal' ? 'Reading Journal' : 'Reading Plans'}
             </h1>
             <p className="mt-1 max-w-[60ch] text-sm text-[var(--text-secondary)]">
               {subTab === 'journal'
                 ? hasActiveFilters
-                  ? `Showing ${filteredLogs.length} of ${indexedLogs.length} ${indexedLogs.length === 1 ? 'session' : 'sessions'}.`
-                  : 'Chronicle your daily Scripture reading and keep study reflections grouped by month.'
-                : 'Follow a structured path or let your free-form reading automatically mark days complete.'}
+                  ? `Showing ${filteredLogs.length} of ${indexedLogs.length} ${indexedLogs.length === 1 ? 'entry' : 'entries'}.`
+                  : 'Keep track of your Bible reading history and private notes grouped by month.'
+                : 'Follow a structured plan — any chapters you log automatically mark matching plan days done.'}
             </p>
           </div>
 
@@ -172,7 +184,7 @@ export const JournalView: React.FC<JournalViewProps> = ({
                   <div className="grid grid-cols-3 divide-x divide-[var(--border-subtle)] rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] sm:inline-grid">
                     <div className="px-3 py-2 text-center sm:px-4">
                       <p className="text-[0.7rem] text-[var(--text-secondary)] sm:text-xs">
-                        Sessions
+                        Entries
                       </p>
                       <p className="mt-0.5 font-display text-base font-medium tabular-nums text-[var(--text-primary)]">
                         {stats.totalSessions}
@@ -188,7 +200,7 @@ export const JournalView: React.FC<JournalViewProps> = ({
                     </div>
                     <div className="px-3 py-2 text-center sm:px-4">
                       <p className="text-[0.7rem] text-[var(--text-secondary)] sm:text-xs">
-                        Reflections
+                        Notes
                       </p>
                       <p className="mt-0.5 font-display text-base font-medium tabular-nums text-[var(--text-primary)]">
                         {stats.reflectionsCount}
@@ -202,10 +214,23 @@ export const JournalView: React.FC<JournalViewProps> = ({
                     transition={SPRING_TACTILE}
                     onClick={() => setComposerOpen((prev) => !prev)}
                     aria-expanded={composerOpen}
-                    className="btn-primary inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90 sm:min-h-9 sm:py-1.5"
+                    className={`${
+                      composerOpen
+                        ? 'border border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
+                        : 'btn-primary hover:opacity-90'
+                    } inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-colors sm:min-h-9 sm:py-1.5`}
                   >
-                    <Plus className="h-4 w-4" aria-hidden="true" />
-                    <span>{composerOpen ? 'Hide composer' : 'Record entry'}</span>
+                    {composerOpen ? (
+                      <>
+                        <X className="h-4 w-4" aria-hidden="true" />
+                        <span>Close</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="h-4 w-4" aria-hidden="true" />
+                        <span>Add entry</span>
+                      </>
+                    )}
                   </motion.button>
                 </div>
 
@@ -228,7 +253,7 @@ export const JournalView: React.FC<JournalViewProps> = ({
                           }
                         }}
                         aria-label="Filter reading journal"
-                        placeholder="Search logs by book, chapter, reflection note, or date…"
+                        placeholder="Search by book, chapter, note, or date…"
                         className="folio-input min-h-11 w-full py-2 pl-9 pr-10 text-base placeholder:text-[var(--text-secondary)] sm:min-h-10 sm:text-sm [&::-webkit-search-cancel-button]:hidden"
                       />
                       {search ? (
@@ -251,7 +276,7 @@ export const JournalView: React.FC<JournalViewProps> = ({
                       {(
                         [
                           { id: 'all', label: 'All entries' },
-                          { id: 'reflections', label: 'Reflections' },
+                          { id: 'reflections', label: 'With notes' },
                           { id: 'plan-linked', label: 'From plans' },
                         ] as const
                       ).map((opt) => {
@@ -284,14 +309,14 @@ export const JournalView: React.FC<JournalViewProps> = ({
 
                     {stats.divisionsPresent.length > 1 && (
                       <select
-                        aria-label="Filter entries by biblical division"
+                        aria-label="Filter entries by Bible section"
                         value={activeDivision}
                         onChange={(e) =>
                           setDivision(e.target.value as 'ALL' | BibleDivision)
                         }
                         className="folio-input min-h-10 px-3 py-2 text-base font-medium sm:min-h-0 sm:text-xs"
                       >
-                        <option value="ALL">All divisions</option>
+                        <option value="ALL">All sections</option>
                         {stats.divisionsPresent.map((div) => (
                           <option key={div.id} value={div.id}>
                             {div.label}
@@ -317,6 +342,8 @@ export const JournalView: React.FC<JournalViewProps> = ({
           <PlansView
             onOpenBook={onOpenBook}
             onInspectJournalNotes={handleInspectJournalFromPlan}
+            onOpenAccount={onOpenAccount}
+            onOpenFriends={onOpenFriends}
           />
         </motion.div>
       ) : (
@@ -340,21 +367,21 @@ export const JournalView: React.FC<JournalViewProps> = ({
             >
               <p className="font-display text-xl font-medium text-[var(--text-primary)]">
                 {indexedLogs.length === 0
-                  ? 'Your journal awaits its first entry'
+                  ? 'Your journal is empty'
                   : lens === 'reflections' && stats.reflectionsCount === 0 && !search.trim()
-                    ? 'No reflection notes written yet'
+                    ? 'No notes written yet'
                     : lens === 'plan-linked' && stats.planLinkedCount === 0 && !search.trim()
                       ? 'No plan-linked entries yet'
                       : 'No matching entries'}
               </p>
               <p className="mx-auto mt-1.5 max-w-[52ch] text-sm text-[var(--text-secondary)]">
                 {indexedLogs.length === 0
-                  ? 'Record today’s passage and reflection right here, or log chapters from the Sanctuary Dashboard.'
+                  ? 'Add a passage and note here, or log chapters from Home.'
                   : lens === 'reflections' && stats.reflectionsCount === 0 && !search.trim()
-                    ? 'Edit any entry or record a new passage with a note to build your commonplace reflections.'
+                    ? 'Edit any entry or add a new passage with a note to keep your study notes together.'
                     : lens === 'plan-linked' && stats.planLinkedCount === 0 && !search.trim()
-                      ? 'Entries logged from Reading Plans or tagged with a plan in the composer will gather here.'
-                      : 'Try another search term, switch back to All entries, or clear your division filter.'}
+                      ? 'Entries logged from Reading Plans or tagged with a plan will appear here.'
+                      : 'Try another search term, switch back to All entries, or clear your section filter.'}
               </p>
               {indexedLogs.length === 0 ? (
                 <motion.button
@@ -383,7 +410,7 @@ export const JournalView: React.FC<JournalViewProps> = ({
               {monthGroups.length > 1 && (
                 <nav
                   aria-label="Jump to journal month"
-                  className="-mx-3.5 flex flex-nowrap items-center gap-1.5 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0"
+                  className="no-scrollbar -mx-3.5 flex flex-nowrap items-center gap-1.5 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0"
                 >
                   {monthGroups.map((group) => (
                     <button
@@ -431,15 +458,12 @@ export const JournalView: React.FC<JournalViewProps> = ({
                           key={log.id}
                           log={log}
                           todayIso={todayIso}
+                          linkedPlan={log.planId ? plansById.get(log.planId) ?? null : null}
                           reflectionFocus={lens === 'reflections'}
                           onOpenBook={onOpenBook}
                           onOpenPlan={handleOpenPlanFromLog}
-                          onEditSave={async (id, patch) => {
-                            await editLog(id, patch);
-                          }}
-                          onDelete={async (id) => {
-                            await removeLog(id);
-                          }}
+                          onEditSave={editLog}
+                          onDelete={removeLog}
                         />
                       ))}
                     </ul>

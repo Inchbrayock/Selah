@@ -7,7 +7,7 @@ import {
   getEncouragementCooldownRemainingMs,
 } from '../../lib/fellowship';
 import { SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
-import { useBibleStore } from '../../store/useBibleStore';
+import { useFriendsStore } from '../../store/useBibleStore';
 import type { EncouragementPresetId } from '../../types/bible';
 
 interface EncouragementSenderProps {
@@ -27,7 +27,7 @@ export const EncouragementSender: React.FC<EncouragementSenderProps> = ({
     sentEncouragementCooldowns,
     sendQuietEncouragement,
     refreshEncouragementCooldown,
-  } = useBibleStore();
+  } = useFriendsStore();
   const [expanded, setExpanded] = useState(!compact);
   const [sendingId, setSendingId] = useState<EncouragementPresetId | null>(null);
   const [justSentId, setJustSentId] = useState<EncouragementPresetId | null>(null);
@@ -54,7 +54,7 @@ export const EncouragementSender: React.FC<EncouragementSenderProps> = ({
         setExpanded(false);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to send quiet note.');
+      setError(err instanceof Error ? err.message : 'Unable to send encouragement.');
     } finally {
       setSendingId(null);
     }
@@ -72,8 +72,8 @@ export const EncouragementSender: React.FC<EncouragementSenderProps> = ({
           disabled={onCooldown}
           title={
             onCooldown
-              ? `Next quiet note available in ${formatCooldownRemaining(remainingMs)}`
-              : `Send a quiet note to ${recipientName}`
+              ? `Next encouragement available in ${formatCooldownRemaining(remainingMs)}`
+              : `Send an encouragement to ${recipientName}`
           }
           className="tactile-press inline-flex min-h-8 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] disabled:opacity-60"
         >
@@ -84,8 +84,8 @@ export const EncouragementSender: React.FC<EncouragementSenderProps> = ({
           )}
           <span>
             {onCooldown
-              ? `Note resting (${formatCooldownRemaining(remainingMs)})`
-              : 'Send quiet note'}
+              ? `Sent · wait ${formatCooldownRemaining(remainingMs)}`
+              : 'Send encouragement'}
           </span>
         </button>
       </div>
@@ -97,7 +97,7 @@ export const EncouragementSender: React.FC<EncouragementSenderProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]">
           <Feather className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
-          <span>Quiet encouragement</span>
+          <span>Send encouragement</span>
         </div>
         <div className="flex items-center gap-2">
           {onCooldown && (
@@ -149,8 +149,7 @@ export const EncouragementSender: React.FC<EncouragementSenderProps> = ({
 
       {onCooldown && (
         <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
-          Your last quiet note for {recipientName} is already set in their margin. One note every 12
-          hours keeps Selah peaceful.
+          You already sent an encouragement to {recipientName}. You can send one every 12 hours.
         </p>
       )}
 

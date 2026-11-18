@@ -42,12 +42,6 @@ class SelahDatabase extends Dexie {
       preferences: 'key',
       customPlans: 'id, updatedAt',
     });
-    this.version(3).stores({
-      readingLogs: 'id, bookId, readDate, loggedAt',
-      preferences: 'key',
-      customPlans: 'id, updatedAt',
-      friendCache: 'ownerUid',
-    });
     this.version(4).stores({
       readingLogs: 'id, bookId, readDate, loggedAt',
       preferences: 'key',

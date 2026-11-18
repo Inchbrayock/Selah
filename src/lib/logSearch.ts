@@ -245,28 +245,26 @@ export function indexReadingLogForSearch(
   };
 }
 
-/** Matches a pre-indexed reading log entry against a user search query. */
-export function matchesIndexedReadingLog(
-  entry: IndexedReadingLog,
-  rawQuery: string
-): boolean {
-  const q = normalizeSearchText(rawQuery);
-  if (!q) return true;
+export interface CompiledLogSearchQuery {
+  normalized: string;
+  isPureShortNumber: boolean;
+  tokens: QueryToken[];
+  hasBookOrWordToken: boolean;
+}
 
-  const { bookAliases, chapterSet, chapterRange, noteText, dateInfo } = entry;
-
-  if (noteText && noteText.includes(q)) {
-    return true;
+/** Pre-tokenizes a user search query once outside filter loops. */
+export function compileLogSearchQuery(rawQuery: string): CompiledLogSearchQuery {
+  const normalized = normalizeSearchText(rawQuery);
+  if (!normalized) {
+    return {
+      normalized: '',
+      isPureShortNumber: false,
+      tokens: [],
+      hasBookOrWordToken: false,
+    };
   }
-
-  const isPureShortNumber = /^\d{1,3}$/.test(q) && Number(q) <= 150;
-  if (!isPureShortNumber && dateInfo.texts.some((t) => t.startsWith(q))) {
-    return true;
-  }
-
-  const tokens = tokenizeQuery(q);
-  if (tokens.length === 0) return true;
-
+  const isPureShortNumber = /^\d{1,3}$/.test(normalized) && Number(normalized) <= 150;
+  const tokens = tokenizeQuery(normalized);
   const hasBookOrWordToken = tokens.some(
     (t) =>
       t.kind === 'book' ||
@@ -275,6 +273,33 @@ export function matchesIndexedReadingLog(
         !t.value.includes('/') &&
         !t.value.includes('-'))
   );
+  return {
+    normalized,
+    isPureShortNumber,
+    tokens,
+    hasBookOrWordToken,
+  };
+}
+
+/** Matches a pre-indexed reading log entry against a pre-compiled search query. */
+export function matchesCompiledReadingLog(
+  entry: IndexedReadingLog,
+  compiled: CompiledLogSearchQuery
+): boolean {
+  const { normalized: q, isPureShortNumber, tokens, hasBookOrWordToken } = compiled;
+  if (!q) return true;
+
+  const { bookAliases, chapterSet, chapterRange, noteText, dateInfo } = entry;
+
+  if (noteText && noteText.includes(q)) {
+    return true;
+  }
+
+  if (!isPureShortNumber && dateInfo.texts.some((t) => t.startsWith(q))) {
+    return true;
+  }
+
+  if (tokens.length === 0) return true;
 
   return tokens.every((tok) => {
     switch (tok.kind) {
@@ -332,6 +357,14 @@ export function matchesIndexedReadingLog(
         );
     }
   });
+}
+
+/** Matches a pre-indexed reading log entry against a user search query. */
+export function matchesIndexedReadingLog(
+  entry: IndexedReadingLog,
+  rawQuery: string
+): boolean {
+  return matchesCompiledReadingLog(entry, compileLogSearchQuery(rawQuery));
 }
 
 /** Matches a reading log entry against a search query across book, chapters, note, and date. */

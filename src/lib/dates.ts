@@ -1,35 +1,115 @@
-import { Temporal as PolyfillTemporal } from 'temporal-polyfill';
+const MS_PER_DAY = 86_400_000;
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+const MONTH_SHORT_NAMES = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+] as const;
+
+export interface PlainDateParts {
+  year: number;
+  month: number;
+  day: number;
+  /** ISO weekday: 1 = Monday ... 7 = Sunday */
+  dayOfWeek: number;
+}
+
+const formatterCache = new Map<string, Intl.DateTimeFormat>();
+const formattedDateCache = new Map<string, string>();
+const MAX_FORMATTED_DATE_CACHE = 2048;
+
+function pad2(value: number): string {
+  return value < 10 ? `0${value}` : String(value);
+}
+
+function pad4(value: number): string {
+  return String(value).padStart(4, '0');
+}
+
+function formatIsoParts(year: number, month: number, day: number): string {
+  return `${pad4(year)}-${pad2(month)}-${pad2(day)}`;
+}
+
+function parseValidatedParts(isoDate: string): { year: number; month: number; day: number; utcMs: number } {
+  const match = ISO_DATE_RE.exec(isoDate);
+  if (!match) {
+    throw new RangeError(`Invalid plain date: ${isoDate}`);
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const utcMs = Date.UTC(year, month - 1, day);
+  const check = new Date(utcMs);
+  if (
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() + 1 !== month ||
+    check.getUTCDate() !== day
+  ) {
+    throw new RangeError(`Invalid calendar date: ${isoDate}`);
+  }
+  return { year, month, day, utcMs };
+}
 
 /**
- * Resolve Temporal API (native when available, temporal-polyfill fallback).
- * Ensures location-agnostic calendar date arithmetic never suffers UTC/DST drift.
+ * Converts a validated YYYY-MM-DD date string to an integer UTC day index (days since 1970-01-01).
+ * Immune to local timezone and DST shifts.
  */
-export function getTemporal(): typeof PolyfillTemporal {
-  const g = globalThis as typeof globalThis & { Temporal?: typeof PolyfillTemporal };
-  return typeof g.Temporal !== 'undefined' ? g.Temporal : PolyfillTemporal;
+export function toUtcDayIndex(isoDate: string): number {
+  return Math.floor(parseValidatedParts(isoDate).utcMs / MS_PER_DAY);
+}
+
+function fromUtcDayIndex(dayIndex: number): PlainDateParts & { iso: string } {
+  const d = new Date(dayIndex * MS_PER_DAY);
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth() + 1;
+  const day = d.getUTCDate();
+  const utcDay = d.getUTCDay();
+  const dayOfWeek = utcDay === 0 ? 7 : utcDay;
+  return {
+    year,
+    month,
+    day,
+    dayOfWeek,
+    iso: formatIsoParts(year, month, day),
+  };
 }
 
 export function todayPlainDate(): string {
-  return getTemporal().Now.plainDateISO().toString();
+  const now = new Date();
+  return formatIsoParts(now.getFullYear(), now.getMonth() + 1, now.getDate());
 }
 
-export function parsePlainDate(isoDate: string) {
-  return getTemporal().PlainDate.from(isoDate);
+export function parsePlainDate(isoDate: string): PlainDateParts {
+  const { year, month, day, utcMs } = parseValidatedParts(isoDate);
+  const utcDay = new Date(utcMs).getUTCDay();
+  return {
+    year,
+    month,
+    day,
+    dayOfWeek: utcDay === 0 ? 7 : utcDay,
+  };
 }
 
 export function addDays(isoDate: string, days: number): string {
-  return parsePlainDate(isoDate).add({ days }).toString();
+  return fromUtcDayIndex(toUtcDayIndex(isoDate) + days).iso;
 }
 
 export function comparePlainDates(a: string, b: string): number {
-  const T = getTemporal();
-  return T.PlainDate.compare(T.PlainDate.from(a), T.PlainDate.from(b));
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 export function diffCalendarDays(earlierIso: string, laterIso: string): number {
-  const earlier = parsePlainDate(earlierIso);
-  const later = parsePlainDate(laterIso);
-  return earlier.until(later, { largestUnit: 'day' }).days;
+  return toUtcDayIndex(laterIso) - toUtcDayIndex(earlierIso);
 }
 
 export function getDayOfWeek(isoDate: string): number {
@@ -38,24 +118,45 @@ export function getDayOfWeek(isoDate: string): number {
 }
 
 export function getLocalHourFromIsoInstant(isoInstant: string): number {
-  const T = getTemporal();
-  try {
-    const zdt = T.Instant.from(isoInstant).toZonedDateTimeISO(T.Now.timeZoneId());
-    return zdt.hour;
-  } catch {
-    return new Date(isoInstant).getHours();
+  const parsed = new Date(isoInstant);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getHours();
+}
+
+function getDateFormatter(options: Intl.DateTimeFormatOptions): {
+  key: string;
+  formatter: Intl.DateTimeFormat;
+} {
+  const key = `${options.year ?? ''}|${options.month ?? ''}|${options.day ?? ''}|${options.weekday ?? ''}`;
+  let formatter = formatterCache.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'UTC' });
+    formatterCache.set(key, formatter);
   }
+  return { key, formatter };
 }
 
 export function formatPlainDate(
   isoDate: string,
   options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' }
 ): string {
-  return parsePlainDate(isoDate).toLocaleString('en-US', options);
+  const { key, formatter } = getDateFormatter(options);
+  const cacheKey = `${key}|${isoDate}`;
+  const cached = formattedDateCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const { year, month, day } = parseValidatedParts(isoDate);
+  // Use UTC noon so date formatting never drifts across calendar day boundaries
+  const formatted = formatter.format(new Date(Date.UTC(year, month - 1, day, 12)));
+
+  if (formattedDateCache.size >= MAX_FORMATTED_DATE_CACHE) {
+    formattedDateCache.clear();
+  }
+  formattedDateCache.set(cacheKey, formatted);
+  return formatted;
 }
 
 export function formatShortDate(isoDate: string): string {
-  return parsePlainDate(isoDate).toLocaleString('en-US', { month: 'short', day: 'numeric' });
+  return formatPlainDate(isoDate, { month: 'short', day: 'numeric' });
 }
 
 export interface HeatmapDay {
@@ -78,34 +179,39 @@ export interface HeatmapCalendarData {
 }
 
 function buildHeatmapGrid(
-  startSunday: PolyfillTemporal.PlainDate,
+  startSundayIndex: number,
   weekCount: number,
-  today: PolyfillTemporal.PlainDate,
+  todayIndex: number,
   restrictYear?: number
 ): HeatmapCalendarData {
-  const T = getTemporal();
   const totalDays = weekCount * 7;
-  const days: HeatmapDay[] = [];
+  const days: HeatmapDay[] = new Array(totalDays);
   const monthLabels: HeatmapMonthLabel[] = [];
   let lastMonth = -1;
 
   for (let i = 0; i < totalDays; i++) {
-    const current = startSunday.add({ days: i });
+    const dayIndex = startSundayIndex + i;
+    const current = fromUtcDayIndex(dayIndex);
     const weekIndex = Math.floor(i / 7);
     const dayOfWeekIndex = i % 7;
-    const dateStr = current.toString();
     const isOutsideRange = restrictYear !== undefined && current.year !== restrictYear;
-    const isFuture = T.PlainDate.compare(current, today) > 0;
+    const isFuture = dayIndex > todayIndex;
 
     if (!isOutsideRange && dayOfWeekIndex === 0 && current.month !== lastMonth) {
       monthLabels.push({
         weekIndex,
-        label: current.toLocaleString('en-US', { month: 'short' }),
+        label: MONTH_SHORT_NAMES[current.month - 1],
       });
       lastMonth = current.month;
     }
 
-    days.push({ date: dateStr, dayOfWeekIndex, weekIndex, isFuture, isOutsideRange });
+    days[i] = {
+      date: current.iso,
+      dayOfWeekIndex,
+      weekIndex,
+      isFuture,
+      isOutsideRange,
+    };
   }
 
   return { days, monthLabels, weekCount };
@@ -116,14 +222,14 @@ function buildHeatmapGrid(
  * covering the last `weeks` weeks ending on `endDateIso`.
  */
 export function buildHeatmapCalendar(endDateIso: string, weeks = 52): HeatmapCalendarData {
-  const end = parsePlainDate(endDateIso);
+  const endIndex = toUtcDayIndex(endDateIso);
+  const end = fromUtcDayIndex(endIndex);
   // Convert ISO dayOfWeek (1=Mon..7=Sun) to Sunday-first index (0=Sun..6=Sat)
   const endSundayOffset = end.dayOfWeek === 7 ? 0 : end.dayOfWeek;
-  const endWeekSaturday = end.add({ days: 6 - endSundayOffset });
-  const totalDays = weeks * 7;
-  const startSunday = endWeekSaturday.subtract({ days: totalDays - 1 });
+  const endWeekSaturdayIndex = endIndex + (6 - endSundayOffset);
+  const startSundayIndex = endWeekSaturdayIndex - (weeks * 7 - 1);
 
-  return buildHeatmapGrid(startSunday, weeks, end);
+  return buildHeatmapGrid(startSundayIndex, weeks, endIndex);
 }
 
 /**
@@ -134,19 +240,20 @@ export function buildYearHeatmapCalendar(
   year: number,
   todayIso = todayPlainDate()
 ): HeatmapCalendarData {
-  const T = getTemporal();
-  const today = parsePlainDate(todayIso);
-  const jan1 = T.PlainDate.from({ year, month: 1, day: 1 });
-  const dec31 = T.PlainDate.from({ year, month: 12, day: 31 });
+  const todayIndex = toUtcDayIndex(todayIso);
+  const jan1Index = Math.floor(Date.UTC(year, 0, 1) / MS_PER_DAY);
+  const dec31Index = Math.floor(Date.UTC(year, 11, 31) / MS_PER_DAY);
 
-  const startOffset = jan1.dayOfWeek === 7 ? 0 : jan1.dayOfWeek;
-  const startSunday = jan1.subtract({ days: startOffset });
+  const jan1Dow = fromUtcDayIndex(jan1Index).dayOfWeek;
+  const startOffset = jan1Dow === 7 ? 0 : jan1Dow;
+  const startSundayIndex = jan1Index - startOffset;
 
-  const endOffset = dec31.dayOfWeek === 7 ? 0 : dec31.dayOfWeek;
-  const endSaturday = dec31.add({ days: 6 - endOffset });
+  const dec31Dow = fromUtcDayIndex(dec31Index).dayOfWeek;
+  const endOffset = dec31Dow === 7 ? 0 : dec31Dow;
+  const endSaturdayIndex = dec31Index + (6 - endOffset);
 
-  const totalDays = startSunday.until(endSaturday, { largestUnit: 'day' }).days + 1;
+  const totalDays = endSaturdayIndex - startSundayIndex + 1;
   const weekCount = Math.round(totalDays / 7);
 
-  return buildHeatmapGrid(startSunday, weekCount, today, year);
+  return buildHeatmapGrid(startSundayIndex, weekCount, todayIndex, year);
 }

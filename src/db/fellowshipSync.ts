@@ -8,13 +8,13 @@ import {
   query,
   serverTimestamp,
   setDoc,
-  Timestamp,
   updateDoc,
   where,
   writeBatch,
   type DocumentData,
 } from 'firebase/firestore';
 import type { AccountUser } from '../lib/auth';
+import { resolveAccountDisplayName, timestampToIso } from './firestoreUtils';
 import {
   decodeCustomPlanSections,
   encodeCustomPlanSections,
@@ -50,32 +50,6 @@ import type {
 const COHORT_ID_REGEX = /^[a-z0-9-]{4,40}$/;
 const PLAIN_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_COHORT_PARTICIPANTS = 12;
-
-function timestampToIso(value: unknown): string {
-  if (value instanceof Timestamp) {
-    return value.toDate().toISOString();
-  }
-  if (
-    value &&
-    typeof value === 'object' &&
-    'toDate' in value &&
-    typeof (value as { toDate?: unknown }).toDate === 'function'
-  ) {
-    return (value as { toDate: () => Date }).toDate().toISOString();
-  }
-  if (typeof value === 'string' && value) return value;
-  return new Date().toISOString();
-}
-
-function resolveDisplayName(user: AccountUser): string {
-  const trimmed = (user.displayName ?? '').trim().slice(0, 100);
-  if (trimmed) return trimmed;
-  if (user.email) {
-    const localPart = user.email.split('@')[0]?.trim();
-    if (localPart) return localPart.slice(0, 100);
-  }
-  return 'Selah Reader';
-}
 
 function resolveMemberPhotoUrl(user: AccountUser, privacy?: FriendPrivacySettings): string | null {
   const safePrivacy = sanitizeFriendPrivacy(privacy);
@@ -247,7 +221,7 @@ export async function createSharedPlanCohort(params: {
   }
 
   const cohortId = await allocateAvailableCohortId(services.db);
-  const hostName = resolveDisplayName(params.hostUser);
+  const hostName = resolveAccountDisplayName(params.hostUser);
   const planType: SharedPlanType = params.plan.isCustom ? 'custom' : 'builtin';
   const sections = planType === 'custom' ? extractSectionsFromPlan(params.plan) : [];
   const sectionsSpec = planType === 'custom' ? encodeCustomPlanSections(sections).slice(0, 2000) : '';
@@ -404,7 +378,7 @@ export async function joinSharedPlanCohort(params: {
   const progress = computeCohortMemberProgress(params.cohort, params.summary);
   const lastReadDate = computeLastReadDate(params.summary);
   const memberRef = doc(services.db, 'sharedPlans', params.cohort.id, 'members', params.user.uid);
-  const displayName = resolveDisplayName(params.user);
+  const displayName = resolveAccountDisplayName(params.user);
   const photoURL = resolveMemberPhotoUrl(params.user, params.ownPrivacy);
 
   if (params.existingMember) {
@@ -450,7 +424,7 @@ export async function publishSharedPlanMemberProgress(params: {
   const progress = computeCohortMemberProgress(params.cohort, params.summary);
   const lastReadDate = computeLastReadDate(params.summary);
   await updateDoc(doc(services.db, 'sharedPlans', params.cohort.id, 'members', params.user.uid), {
-    displayName: resolveDisplayName(params.user),
+    displayName: resolveAccountDisplayName(params.user),
     photoURL: resolveMemberPhotoUrl(params.user, params.ownPrivacy),
     status: 'joined',
     completedDays: progress.completedDays,
@@ -589,7 +563,7 @@ export async function sendQuietEncouragement(params: {
     params.senderUser.uid
   );
   const existing = await getDoc(ref);
-  const senderName = resolveDisplayName(params.senderUser);
+  const senderName = resolveAccountDisplayName(params.senderUser);
   const senderPhotoURL = resolveMemberPhotoUrl(params.senderUser, params.ownPrivacy);
   const normalizedCohortTitle =
     typeof params.cohortTitle === 'string' && params.cohortTitle.trim()

@@ -3,15 +3,33 @@ import {
   addDays,
   buildHeatmapCalendar,
   buildYearHeatmapCalendar,
+  comparePlainDates,
   diffCalendarDays,
+  formatPlainDate,
+  formatShortDate,
   getDayOfWeek,
+  parsePlainDate,
 } from '../lib/dates';
 
-describe('Temporal PlainDate helpers', () => {
+describe('PlainDate calendar helpers', () => {
   it('adds and diffs calendar days accurately across leap years and month ends', () => {
     expect(addDays('2024-02-28', 1)).toBe('2024-02-29');
+    expect(addDays('2024-03-01', -1)).toBe('2024-02-29');
+    expect(addDays('2025-02-28', 1)).toBe('2025-03-01');
     expect(addDays('2026-11-01', 11)).toBe('2026-11-12');
     expect(diffCalendarDays('2026-10-30', '2026-11-02')).toBe(3);
+    expect(comparePlainDates('2026-10-30', '2026-11-02')).toBe(-1);
+    expect(comparePlainDates('2026-11-02', '2026-11-02')).toBe(0);
+    expect(comparePlainDates('2026-11-03', '2026-11-02')).toBe(1);
+  });
+
+  it('validates plain dates and formats dates deterministically without timezone drift', () => {
+    expect(parsePlainDate('2024-02-29')).toEqual({ year: 2024, month: 2, day: 29, dayOfWeek: 4 });
+    expect(() => parsePlainDate('2025-02-29')).toThrow();
+    expect(() => parsePlainDate('not-a-date')).toThrow();
+    expect(formatPlainDate('2026-11-12')).toBe('Nov 12, 2026');
+    expect(formatShortDate('2026-11-12')).toBe('Nov 12');
+    expect(formatPlainDate('2026-11-01', { month: 'short', year: 'numeric' })).toBe('Nov 2026');
   });
 
   it('identifies Sunday as ISO day 7', () => {

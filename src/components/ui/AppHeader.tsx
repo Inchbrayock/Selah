@@ -1,8 +1,13 @@
-import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Award, BookOpen, Compass, ScrollText, User, Users } from 'lucide-react';
+import { Award, BookOpen, Home, ScrollText, User } from 'lucide-react';
 import { SPRING_DOCK, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
-import { type CloudSyncStatus, useBibleStore } from '../../store/useBibleStore';
+import {
+  type CloudSyncStatus,
+  useAccountSync,
+  useFriendsStore,
+  useReadingData,
+} from '../../store/useBibleStore';
 import { ProfileAvatar } from './ProfileAvatar';
 import { SanctuaryLamp } from './SanctuaryLamp';
 
@@ -18,22 +23,22 @@ interface AppHeaderProps {
 }
 
 const SYNC_LABELS: Record<CloudSyncStatus, string> = {
-  synced: 'Synced to cloud',
-  syncing: 'Syncing ledger',
+  synced: 'Synced',
+  syncing: 'Syncing…',
   offline: 'Offline',
   error: 'Sync issue',
-  local: 'Local only',
+  local: 'Saved on device',
 };
 
 const NAV_ITEMS: {
   id: PrimaryTab;
   label: string;
-  shortLabel: string;
+  shortLabel?: string;
   icon: React.ComponentType<{ className?: string }>;
 }[] = [
-  { id: 'dashboard', label: 'Sanctuary', shortLabel: 'Sanctuary', icon: Compass },
-  { id: 'library', label: 'Books & Chapters', shortLabel: 'Books', icon: BookOpen },
-  { id: 'achievements', label: 'Hall of Seals', shortLabel: 'Seals', icon: Award },
+  { id: 'dashboard', label: 'Home', icon: Home },
+  { id: 'library', label: 'Books', icon: BookOpen },
+  { id: 'achievements', label: 'Milestones', icon: Award },
   { id: 'journal', label: 'Journal & Plans', shortLabel: 'Journal', icon: ScrollText },
 ];
 
@@ -44,9 +49,19 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   accountOpen = false,
   accountButtonRef,
 }) => {
-  const { summary, user, authLoading, syncStatus, incomingRequests } = useBibleStore();
+  const { summary } = useReadingData();
+  const { user, authLoading, syncStatus } = useAccountSync();
+  const { incomingRequests, unreadEncouragementsCount, sharedPlans } = useFriendsStore();
   const hasStreak = summary.currentStreak > 0;
   const activeIndex = NAV_ITEMS.findIndex((item) => item.id === activeTab);
+
+  const pendingInvitesCount = useMemo(
+    () => sharedPlans.filter((sp) => sp.myMembership?.status === 'invited').length,
+    [sharedPlans]
+  );
+  const friendsAttentionCount = user
+    ? incomingRequests.length + unreadEncouragementsCount + pendingInvitesCount
+    : 0;
 
   const tabButtonRefs = useRef<Partial<Record<PrimaryTab, HTMLButtonElement | null>>>({});
   const [underline, setUnderline] = useState<{ left: number; width: number } | null>(null);
@@ -73,9 +88,18 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
     return () => window.removeEventListener('resize', measureDesktopUnderline);
   }, [measureDesktopUnderline]);
 
+  const accountName = user?.displayName || user?.email || 'Account';
   const accountTitle = user
-    ? `${user.displayName || user.email || 'Sanctuary account'} (${SYNC_LABELS[syncStatus]})`
-    : undefined;
+    ? friendsAttentionCount > 0
+      ? `${accountName} (${SYNC_LABELS[syncStatus]} · ${friendsAttentionCount} new)`
+      : `${accountName} (${SYNC_LABELS[syncStatus]})`
+    : 'Sign in or open account menu';
+
+  const accountAriaLabel = user
+    ? friendsAttentionCount > 0
+      ? `Open profile menu (${accountName}, ${friendsAttentionCount} new)`
+      : `Open profile menu (${accountName})`
+    : 'Sign in or open account menu';
 
   const syncDotClass =
     syncStatus === 'synced'
@@ -83,6 +107,9 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       : syncStatus === 'error'
         ? 'bg-[var(--color-crimson)]'
         : 'bg-[var(--color-lamp)]';
+
+  const profileMenuHighlighted =
+    accountOpen || activeTab === 'friends' || activeTab === 'settings';
 
   return (
     <header className="sticky top-0 z-30 pt-[env(safe-area-inset-top)]">
@@ -93,7 +120,12 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       />
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-3.5 py-2.5 sm:px-6 lg:gap-4 lg:py-0">
         {/* Wordmark */}
-        <div className="flex min-w-0 items-center gap-2.5 sm:shrink-0 sm:gap-3 lg:py-3">
+        <button
+          type="button"
+          onClick={() => onSelectTab('dashboard')}
+          className="flex min-w-0 items-center gap-2.5 text-left sm:shrink-0 sm:gap-3 lg:py-3"
+          aria-label="Selah — go to Home"
+        >
           <div
             className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors duration-300 sm:h-9 sm:w-9 ${
               hasStreak
@@ -106,7 +138,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           <span className="font-display text-xl font-medium tracking-tight text-[var(--text-primary)] sm:text-2xl">
             Selah
           </span>
-        </div>
+        </button>
 
         {/* Responsive Editorial Navigation (Floating bottom pill on < lg, Top inline on lg+) */}
         <nav
@@ -153,7 +185,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   whileTap={TACTILE_PILL_TAP}
                   onClick={() => onSelectTab(item.id)}
                   aria-current={isActive ? 'page' : undefined}
-                  className={`relative flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1.5 text-[0.68rem] font-medium leading-tight transition-colors sm:text-xs lg:min-h-0 lg:flex-row lg:gap-1.5 lg:rounded-none lg:whitespace-nowrap lg:px-2 lg:py-4 lg:text-sm xl:gap-2 xl:px-2.5 ${
+                  className={`relative flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1.5 text-[0.68rem] font-medium leading-tight transition-colors sm:text-xs lg:min-h-0 lg:flex-row lg:gap-1.5 lg:rounded-none lg:whitespace-nowrap lg:px-2.5 lg:py-4 lg:text-sm xl:gap-2 xl:px-3 ${
                     isActive
                       ? 'text-[var(--text-primary)]'
                       : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -171,10 +203,18 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                       }`}
                     />
                   </motion.span>
-                  <span aria-hidden="true" className="truncate sm:hidden">
-                    {item.shortLabel}
-                  </span>
-                  <span className="sr-only sm:not-sr-only lg:inline lg:whitespace-nowrap">{item.label}</span>
+                  {item.shortLabel ? (
+                    <>
+                      <span aria-hidden="true" className="truncate sm:hidden">
+                        {item.shortLabel}
+                      </span>
+                      <span className="sr-only sm:not-sr-only lg:inline lg:whitespace-nowrap">
+                        {item.label}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="truncate lg:whitespace-nowrap">{item.label}</span>
+                  )}
                 </motion.button>
               );
             })}
@@ -184,34 +224,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         {/* Actions */}
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 lg:py-3">
           <motion.button
-            type="button"
-            whileTap={TACTILE_TAP}
-            onClick={() => onSelectTab('friends')}
-            title="Reading Circle"
-            aria-current={activeTab === 'friends' ? 'page' : undefined}
-            aria-label={
-              incomingRequests.length > 0
-                ? `Open Reading Circle (${incomingRequests.length} pending ${
-                    incomingRequests.length === 1 ? 'request' : 'requests'
-                  })`
-                : 'Open Reading Circle'
-            }
-            className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors sm:h-9 sm:w-9 ${
-              activeTab === 'friends'
-                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            <Users className="h-4 w-4" aria-hidden="true" />
-            {incomingRequests.length > 0 && (
-              <span
-                aria-hidden="true"
-                className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-[var(--color-accent)] ring-2 ring-[var(--bg-canvas)]"
-              />
-            )}
-          </motion.button>
-
-          <motion.button
             ref={accountButtonRef}
             type="button"
             whileTap={TACTILE_TAP}
@@ -220,14 +232,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             title={accountTitle}
             aria-expanded={accountOpen}
             aria-haspopup="dialog"
-            aria-label={
-              user
-                ? `Open account and cloud sync (${user.displayName || user.email || 'Account'})`
-                : 'Sign in to sync your Sanctuary account'
-            }
+            aria-label={accountAriaLabel}
             className={
               user
-                ? 'group relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-opacity disabled:opacity-60 sm:h-9 sm:w-9'
+                ? `group relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all disabled:opacity-60 sm:h-9 sm:w-9 ${
+                    profileMenuHighlighted
+                      ? 'ring-2 ring-[var(--color-accent)] ring-offset-2 ring-offset-[var(--bg-canvas)]'
+                      : ''
+                  }`
                 : authLoading
                   ? 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] opacity-70 sm:h-9 sm:w-9'
                   : 'inline-flex min-h-10 min-w-10 items-center justify-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-sm font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)] disabled:opacity-60 sm:min-h-9 sm:min-w-0 sm:px-3'
@@ -241,6 +253,15 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   textClassName="text-xs sm:text-[0.8rem]"
                   interactive
                 />
+                {friendsAttentionCount > 0 && (
+                  <span
+                    aria-hidden="true"
+                    data-testid="profile-attention-badge"
+                    className="absolute -top-1 -right-1 flex h-[1.1rem] min-w-[1.1rem] items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[0.62rem] font-semibold leading-none text-white ring-2 ring-[var(--bg-canvas)]"
+                  >
+                    {friendsAttentionCount > 9 ? '9+' : friendsAttentionCount}
+                  </span>
+                )}
                 <span
                   aria-hidden="true"
                   className={`absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--bg-canvas)] ${syncDotClass} ${

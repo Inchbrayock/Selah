@@ -29,7 +29,7 @@ export const AVATAR_OUTPUT_SIZE = 192;
 export const SANCTUARY_EMBLEMS: SanctuaryEmblemDefinition[] = [
   {
     id: 'lamp',
-    label: 'Sanctuary Lamp',
+    label: 'Reading Lamp',
     scriptureHint: 'Ps. 119:105',
     bg: '#F4EBD7',
     ring: '#D9C396',
@@ -107,10 +107,6 @@ const EMBLEMS_BY_ID = Object.fromEntries(
 
 export function getSanctuaryEmblemUrl(id: SanctuaryEmblemId): string {
   return `${SANCTUARY_EMBLEM_BASE_URL}/${id}.svg`;
-}
-
-export function getSanctuaryEmblemById(id: SanctuaryEmblemId): SanctuaryEmblemDefinition {
-  return EMBLEMS_BY_ID[id];
 }
 
 export function parseSanctuaryEmblemUrl(url: unknown): SanctuaryEmblemDefinition | null {

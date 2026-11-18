@@ -172,7 +172,7 @@ export const ActivePlanFocusCard: React.FC<ActivePlanFocusCardProps> = ({
 
         <div className="grid grid-cols-3 divide-x divide-[var(--border-subtle)] rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] lg:shrink-0">
           <div className="px-3 py-2 text-center sm:px-4">
-            <p className="text-[0.7rem] text-[var(--text-secondary)] sm:text-xs">Days synced</p>
+            <p className="text-[0.7rem] text-[var(--text-secondary)] sm:text-xs">Days done</p>
             <p className="mt-0.5 font-display text-base font-medium tabular-nums text-[var(--text-primary)]">
               {progress.completedDaysCount}/{plan.durationDays}
             </p>
@@ -185,7 +185,7 @@ export const ActivePlanFocusCard: React.FC<ActivePlanFocusCardProps> = ({
           </div>
           <div className="px-3 py-2 text-center sm:px-4">
             <p className="text-[0.7rem] text-[var(--text-secondary)] sm:text-xs">
-              {projectedDate ? '1/day finish' : 'Status'}
+              {projectedDate ? 'Est. finish' : 'Status'}
             </p>
             <p className="mt-0.5 font-display text-base font-medium tabular-nums text-[var(--text-primary)]">
               {projectedDate
@@ -232,6 +232,14 @@ export const ActivePlanFocusCard: React.FC<ActivePlanFocusCardProps> = ({
                     chapters read
                   </span>
                 ) : null}
+                {progress.completedDaysCount > 0 &&
+                nextDayStatus.day.day <= progress.completedDaysCount ? (
+                  <span className="text-xs text-[var(--text-secondary)] tabular-nums">
+                    {progress.completedDaysCount}{' '}
+                    {progress.completedDaysCount === 1 ? 'later day' : 'later days'} already done
+                    from your log
+                  </span>
+                ) : null}
               </div>
 
               <AnimatePresence>
@@ -245,7 +253,7 @@ export const ActivePlanFocusCard: React.FC<ActivePlanFocusCardProps> = ({
                     className="inline-flex items-center gap-1 text-xs font-medium text-[var(--color-sage)]"
                   >
                     <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                    Day {justLoggedDay} inscribed
+                    Day {justLoggedDay} logged
                   </motion.span>
                 ) : null}
               </AnimatePresence>
@@ -257,33 +265,42 @@ export const ActivePlanFocusCard: React.FC<ActivePlanFocusCardProps> = ({
 
             {/* Interactive Passage Chips */}
             <div className="mt-3 flex flex-wrap gap-2">
-              {nextDayStatus.assignmentStatuses.map((assignment) => (
-                <button
-                  key={`${nextDayStatus.day.day}-${assignment.bookId}`}
-                  type="button"
-                  onClick={() => onOpenBook(assignment.bookId)}
-                  className={`tactile-press inline-flex min-h-9 items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    assignment.done
-                      ? 'border-[var(--color-sage)]/45 bg-[var(--color-sage-soft)] text-[var(--color-sage)]'
-                      : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:border-[var(--border-strong)]'
-                  }`}
-                >
-                  <span
-                    aria-hidden="true"
-                    className="h-2 w-2 rounded-full"
-                    style={{ backgroundColor: assignment.divisionColorVar }}
-                  />
-                  <span>{assignment.chapterRangeLabel}</span>
-                  {assignment.done ? (
-                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-[var(--text-secondary)] tabular-nums">
-                      <BookOpen className="h-3 w-3" aria-hidden="true" />
-                      {assignment.readChaptersCount}/{assignment.totalChaptersCount}
+              {nextDayStatus.assignmentStatuses.map((assignment) => {
+                const repeatsTitle =
+                  nextDayStatus.assignmentStatuses.length === 1 &&
+                  assignment.chapterRangeLabel.trim() === nextDayStatus.day.title.trim();
+                return (
+                  <button
+                    key={`${nextDayStatus.day.day}-${assignment.bookId}`}
+                    type="button"
+                    onClick={() => onOpenBook(assignment.bookId)}
+                    className={`tactile-press inline-flex min-h-9 items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                      assignment.done
+                        ? 'border-[var(--color-sage)]/45 bg-[var(--color-sage-soft)] text-[var(--color-sage)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:border-[var(--border-strong)]'
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: assignment.divisionColorVar }}
+                    />
+                    <span>
+                      {repeatsTitle
+                        ? `Open ${assignment.bookName}`
+                        : assignment.chapterRangeLabel}
                     </span>
-                  )}
-                </button>
-              ))}
+                    {assignment.done ? (
+                      <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[var(--text-secondary)] tabular-nums">
+                        <BookOpen className="h-3 w-3" aria-hidden="true" />
+                        {assignment.readChaptersCount}/{assignment.totalChaptersCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Optional Date + Reflection Input + Primary Action */}
@@ -310,7 +327,7 @@ export const ActivePlanFocusCard: React.FC<ActivePlanFocusCardProps> = ({
                   htmlFor="active-plan-note"
                   className="block text-xs font-medium text-[var(--text-secondary)]"
                 >
-                  Reflection note (optional)
+                  Note (optional)
                 </label>
                 <input
                   id="active-plan-note"
@@ -350,7 +367,7 @@ export const ActivePlanFocusCard: React.FC<ActivePlanFocusCardProps> = ({
                   All {plan.durationDays} days completed
                 </p>
                 <p className="text-xs text-[var(--text-secondary)]">
-                  Every chapter in {plan.title} is marked read in your ledger.
+                  Every chapter in {plan.title} is marked read.
                 </p>
               </div>
             </div>

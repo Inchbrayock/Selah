@@ -21,17 +21,19 @@ import {
   Users,
 } from 'lucide-react';
 import { exportSanctuaryBackupFile } from '../../lib/backupFile';
-import {
-  formatUsernameHandle,
-  normalizeUsernameInput,
-  validateUsername,
-} from '../../lib/friends';
+import { formatUsernameHandle } from '../../lib/friends';
 import { FOLIO_EASE, SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
 import { getSystemPrefersDark } from '../../lib/theme';
 import { useAppUpdater } from '../../lib/useAppUpdater';
-import { useBibleStore } from '../../store/useBibleStore';
+import {
+  useAccountSync,
+  useFriendsStore,
+  useReadingData,
+  useUiFeedback,
+} from '../../store/useBibleStore';
 import type { ColorSchemePreference } from '../../types/bible';
 import { FriendPrivacyPanel } from '../friends/FriendPrivacyPanel';
+import { UsernameEditor } from '../friends/UsernameEditor';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
 
 interface SettingsViewProps {
@@ -47,11 +49,11 @@ const SECTION_LINKS: {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }[] = [
-  { id: 'settings-account', label: 'Cloud account', icon: Cloud },
-  { id: 'settings-privacy', label: 'Circle privacy', icon: Shield },
+  { id: 'settings-account', label: 'Account', icon: Cloud },
+  { id: 'settings-privacy', label: 'Friend privacy', icon: Shield },
   { id: 'settings-appearance', label: 'Appearance', icon: Palette },
-  { id: 'settings-cadence', label: 'Reading cadence', icon: SlidersHorizontal },
-  { id: 'settings-data', label: 'Data & portability', icon: Database },
+  { id: 'settings-cadence', label: 'Streak & feedback', icon: SlidersHorizontal },
+  { id: 'settings-data', label: 'Backup & data', icon: Database },
   { id: 'settings-updates', label: 'App updates', icon: RefreshCw },
 ];
 
@@ -62,24 +64,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onEditPhoto,
   onOpenFriends,
 }) => {
+  const { firebaseAvailable, user, syncStatus } = useAccountSync();
+  const { colorScheme, setColorScheme } = useUiFeedback();
   const {
-    firebaseAvailable,
-    user,
-    syncStatus,
-    colorScheme,
-    setColorScheme,
     preferences,
     updatePreferences,
-    ownFriendProfile,
-    friendsError,
-    ensureFriendProfileReady,
-    checkUsernameAvailability,
-    updateUsername,
     exportBackupJson,
     importBackupJson,
     activateDemoJourney,
     resetAllData,
-  } = useBibleStore();
+  } = useReadingData();
+  const { ownFriendProfile, friendsError, ensureFriendProfileReady } = useFriendsStore();
   const {
     currentVersion,
     currentBuild,
@@ -95,28 +90,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   } = useAppUpdater();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const handleCheckTokenRef = useRef(0);
   const handleStatusTimerRef = useRef<number | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
 
   const [editingHandle, setEditingHandle] = useState(false);
-  const [handleDraft, setHandleDraft] = useState(() => ownFriendProfile?.username ?? '');
-  const [handleDirty, setHandleDirty] = useState(false);
-  const [handleCheck, setHandleCheck] = useState<{
-    checking: boolean;
-    available: boolean | null;
-    message: string | null;
-  }>({ checking: false, available: null, message: null });
-  const [handleSaving, setHandleSaving] = useState(false);
   const [handleStatus, setHandleStatus] = useState<string | null>(null);
 
   const systemDark = getSystemPrefersDark();
   const ownHandle = formatUsernameHandle(ownFriendProfile?.username);
-  const normalizedDraft = normalizeUsernameInput(handleDraft);
-  const currentUsername = ownFriendProfile?.username ?? '';
-  const handleUnchanged = Boolean(currentUsername && normalizedDraft === currentUsername);
 
   useEffect(() => {
     if (firebaseAvailable && user && !ownFriendProfile) {
@@ -126,17 +109,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   useEffect(() => {
     setEditingHandle(false);
-    setHandleDirty(false);
-    setHandleDraft(ownFriendProfile?.username ?? '');
-    setHandleCheck({ checking: false, available: null, message: null });
     setHandleStatus(null);
   }, [user?.uid]);
-
-  useEffect(() => {
-    if (!handleDirty) {
-      setHandleDraft(ownFriendProfile?.username ?? '');
-    }
-  }, [handleDirty, ownFriendProfile?.username]);
 
   useEffect(() => {
     return () => {
@@ -145,106 +119,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (!firebaseAvailable || !user || !editingHandle || !handleDirty) return;
-    const normalized = normalizeUsernameInput(handleDraft);
-    const current = ownFriendProfile?.username ?? '';
-    const token = ++handleCheckTokenRef.current;
-
-    if (!normalized) {
-      setHandleCheck({ checking: false, available: null, message: null });
-      return;
-    }
-    const validation = validateUsername(normalized);
-    if (!validation.ok) {
-      setHandleCheck({ checking: false, available: false, message: validation.error });
-      return;
-    }
-    if (validation.username === current) {
-      setHandleCheck({
-        checking: false,
-        available: true,
-        message: 'Your current username',
-      });
-      return;
-    }
-
-    setHandleCheck({ checking: true, available: null, message: 'Checking availability…' });
-    const timer = window.setTimeout(() => {
-      void checkUsernameAvailability(validation.username)
-        .then((res) => {
-          if (handleCheckTokenRef.current !== token) return;
-          if (res.available) {
-            setHandleCheck({
-              checking: false,
-              available: true,
-              message: `@${res.normalized} is available`,
-            });
-          } else {
-            setHandleCheck({
-              checking: false,
-              available: false,
-              message: res.error ?? `@${res.normalized} is already taken.`,
-            });
-          }
-        })
-        .catch(() => {
-          if (handleCheckTokenRef.current !== token) return;
-          setHandleCheck({ checking: false, available: null, message: null });
-        });
-    }, 250);
-
-    return () => window.clearTimeout(timer);
-  }, [
-    checkUsernameAvailability,
-    editingHandle,
-    firebaseAvailable,
-    handleDirty,
-    handleDraft,
-    ownFriendProfile?.username,
-    user,
-  ]);
-
-  const handleOpenEditHandle = () => {
-    setHandleDraft(ownFriendProfile?.username ?? '');
-    setHandleDirty(false);
-    setHandleCheck({ checking: false, available: null, message: null });
-    setHandleStatus(null);
-    setEditingHandle((prev) => !prev);
-  };
-
-  const handleSaveHandle = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (handleSaving) return;
-    const validation = validateUsername(handleDraft);
-    if (!validation.ok) {
-      setHandleCheck({ checking: false, available: false, message: validation.error });
-      return;
-    }
-    setHandleSaving(true);
-    setHandleStatus(null);
-    try {
-      await updateUsername(validation.username);
-      setEditingHandle(false);
-      setHandleDirty(false);
-      setHandleDraft(validation.username);
-      setHandleCheck({ checking: false, available: null, message: null });
-      setHandleStatus(`Username saved as @${validation.username}`);
-      if (handleStatusTimerRef.current !== null) {
-        window.clearTimeout(handleStatusTimerRef.current);
-      }
-      handleStatusTimerRef.current = window.setTimeout(() => setHandleStatus(null), 3500);
-    } catch (err) {
-      setHandleCheck({
-        checking: false,
-        available: false,
-        message: err instanceof Error ? err.message : 'Could not save username.',
-      });
-    } finally {
-      setHandleSaving(false);
-    }
-  };
 
   const handleExport = async () => {
     try {
@@ -294,7 +168,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     {
       id: 'system',
       label: 'System',
-      detail: `Matches OS (${systemDark ? 'dark' : 'light'})`,
+      detail: `Matches device (${systemDark ? 'dark' : 'light'})`,
       icon: Monitor,
       swatchBg: systemDark ? '#12151B' : '#F7F7F4',
       swatchInk: systemDark ? '#EDEFF3' : '#161B22',
@@ -302,8 +176,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     },
     {
       id: 'light',
-      label: 'Dawn Parchment',
-      detail: 'Alabaster paper',
+      label: 'Light',
+      detail: 'Warm alabaster',
       icon: Sun,
       swatchBg: '#F7F7F4',
       swatchInk: '#161B22',
@@ -311,7 +185,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     },
     {
       id: 'dark',
-      label: 'Vesper Candlelight',
+      label: 'Dark',
       detail: 'Midnight slate',
       icon: Moon,
       swatchBg: '#12151B',
@@ -335,10 +209,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
           <div>
             <h1 className="font-display text-2xl font-medium tracking-tight text-[var(--text-primary)] sm:text-[2.15rem]">
-              Sanctuary Settings
+              Settings
             </h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              Cloud account, circle privacy, appearance, reading cadence, data backup, and updates.
+              Account, friend privacy, appearance, reading streak rules, backups, and app updates.
             </p>
           </div>
           <span className="font-mono text-xs text-[var(--text-secondary)]">
@@ -349,11 +223,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </section>
 
       <div className="grid gap-6 lg:grid-cols-12 lg:items-start lg:gap-8">
-        {/* Left Navigation & Account Rail */}
-        <aside className="space-y-5 lg:sticky lg:top-20 lg:col-span-4">
+        {/* Desktop Section Anchor Sidebar */}
+        <aside className="hidden lg:sticky lg:top-20 lg:col-span-3 lg:block">
           <nav
             aria-label="Settings sections"
-            className="hidden divide-y divide-[var(--border-subtle)] overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] lg:block"
+            className="divide-y divide-[var(--border-subtle)] overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)]"
           >
             {SECTION_LINKS.map((item) => {
               const Icon = item.icon;
@@ -370,168 +244,131 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               );
             })}
           </nav>
+        </aside>
 
-          {/* Cloud Account Summary */}
+        {/* Main Settings Column (all sections in one consistent vertical flow) */}
+        <div className="space-y-6 lg:col-span-9">
+          {/* Account Section */}
           <section
             id="settings-account"
-            className="folio-sheet scroll-mt-20 p-4 sm:p-5"
+            className="folio-sheet scroll-mt-20 p-5 sm:p-6"
             aria-labelledby="settings-account-heading"
           >
-            <div className="flex items-start gap-3">
-              {user ? (
-                <ProfileAvatar user={user} sizeClassName="h-10 w-10" textClassName="text-sm" />
-              ) : (
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
-                  <Cloud className="h-4 w-4 text-[var(--color-accent)]" aria-hidden="true" />
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <h2
-                  id="settings-account-heading"
-                  className="font-display text-lg font-medium text-[var(--text-primary)]"
-                >
-                  {user ? user.displayName || user.email || 'Signed in' : 'Cloud account sync'}
-                </h2>
-                {user && ownHandle && (
-                  <p className="mt-0.5 truncate text-xs font-medium text-[var(--color-accent)]">
-                    {ownHandle}
-                  </p>
+            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+              <div className="flex items-start gap-3.5">
+                {user ? (
+                  <ProfileAvatar user={user} sizeClassName="h-11 w-11" textClassName="text-sm" />
+                ) : (
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
+                    <Cloud className="h-5 w-5 text-[var(--color-accent)]" aria-hidden="true" />
+                  </div>
                 )}
-                <p className="mt-0.5 text-xs leading-relaxed text-[var(--text-secondary)]">
-                  {user
-                    ? `Backing up to ${user.email ?? 'your account'} (${syncStatus}).`
-                    : 'Sign in to save your readings, plans, and study notes across devices.'}
-                </p>
+                <div className="min-w-0 flex-1">
+                  <h2
+                    id="settings-account-heading"
+                    className="font-display text-xl font-medium text-[var(--text-primary)]"
+                  >
+                    {user ? user.displayName || user.email || 'Signed in' : 'Cloud account & sync'}
+                  </h2>
+                  {user && ownHandle && (
+                    <p className="mt-0.5 truncate text-xs font-medium text-[var(--color-accent)]">
+                      {ownHandle}
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
+                    {user
+                      ? `Synced with ${user.email ?? 'your account'} (${syncStatus}).`
+                      : 'Sign in to back up your readings, notes, and plans across devices and connect with friends.'}
+                  </p>
+                </div>
               </div>
-            </div>
-            <div className="mt-4 space-y-2">
-              {user && onEditPhoto && (
+
+              {!user && (
                 <button
                   type="button"
-                  onClick={onEditPhoto}
-                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface)] sm:min-h-9"
+                  onClick={onOpenAccount}
+                  className="btn-primary inline-flex min-h-10 shrink-0 items-center justify-center rounded-md px-4 py-2 text-xs font-medium sm:min-h-9"
                 >
-                  <Camera className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
-                  <span>Change profile picture</span>
-                </button>
-              )}
-              {firebaseAvailable && user && (
-                <button
-                  type="button"
-                  aria-expanded={editingHandle}
-                  onClick={handleOpenEditHandle}
-                  className={`inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border px-3.5 py-2 text-xs font-medium transition-colors sm:min-h-9 ${
-                    editingHandle
-                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                      : 'border-[var(--border-strong)] bg-[var(--bg-canvas)] text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
-                  }`}
-                >
-                  <AtSign className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
-                  <span>{ownFriendProfile ? 'Change username' : 'Preparing username…'}</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={onOpenAccount}
-                className="inline-flex min-h-10 w-full items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface)] sm:min-h-9"
-              >
-                {user ? 'Manage account' : 'Sign in'}
-              </button>
-              {onOpenFriends && (
-                <button
-                  type="button"
-                  onClick={onOpenFriends}
-                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-canvas)] sm:min-h-9"
-                >
-                  <Users className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
-                  <span>Open Reading Circle</span>
+                  Sign in
                 </button>
               )}
             </div>
+
+            {user && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {onEditPhoto && (
+                  <button
+                    type="button"
+                    onClick={onEditPhoto}
+                    className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface)]"
+                  >
+                    <Camera className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
+                    <span>Change profile picture</span>
+                  </button>
+                )}
+                {firebaseAvailable && (
+                  <button
+                    type="button"
+                    aria-expanded={editingHandle}
+                    onClick={() => {
+                      setHandleStatus(null);
+                      setEditingHandle((prev) => !prev);
+                    }}
+                    className={`inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                      editingHandle
+                        ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                        : 'border-[var(--border-strong)] bg-[var(--bg-canvas)] text-[var(--text-primary)] hover:bg-[var(--bg-surface)]'
+                    }`}
+                  >
+                    <AtSign className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
+                    <span>{ownFriendProfile ? 'Change username' : 'Preparing username…'}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onOpenAccount}
+                  className="inline-flex min-h-9 items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface)]"
+                >
+                  Manage account
+                </button>
+                {onOpenFriends && (
+                  <button
+                    type="button"
+                    onClick={onOpenFriends}
+                    className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-canvas)]"
+                  >
+                    <Users className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
+                    <span>Open Friends</span>
+                  </button>
+                )}
+              </div>
+            )}
 
             <AnimatePresence initial={false}>
               {firebaseAvailable && user && editingHandle && (
-                <motion.form
+                <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
                   transition={{ duration: 0.2, ease: FOLIO_EASE }}
-                  onSubmit={(e) => void handleSaveHandle(e)}
-                  className="mt-3 overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3.5"
+                  className="overflow-hidden"
                 >
-                  <div className="space-y-2">
-                    <label
-                      htmlFor="username-handle-input"
-                      className="block text-xs font-medium text-[var(--text-primary)]"
-                    >
-                      Your @username
-                    </label>
-                    <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
-                      3–24 letters, numbers, periods, or underscores.
-                    </p>
-                    <div className="relative flex items-center">
-                      <span
-                        aria-hidden="true"
-                        className="pointer-events-none absolute left-3 text-sm text-[var(--text-secondary)]"
-                      >
-                        @
-                      </span>
-                      <input
-                        id="username-handle-input"
-                        type="text"
-                        value={handleDraft}
-                        onChange={(e) => {
-                          setHandleDirty(true);
-                          setHandleStatus(null);
-                          setHandleDraft(normalizeUsernameInput(e.target.value));
-                        }}
-                        maxLength={24}
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        placeholder="hannah.miller"
-                        className="folio-input min-h-10 w-full py-1.5 pl-7 pr-3 text-base sm:text-sm"
-                      />
-                    </div>
-                    {handleCheck.message && (
-                      <p
-                        role="status"
-                        className={`text-xs font-medium ${
-                          handleCheck.available === true
-                            ? 'text-[var(--color-sage)]'
-                            : handleCheck.available === false
-                              ? 'text-[var(--color-crimson)]'
-                              : 'text-[var(--text-secondary)]'
-                        }`}
-                      >
-                        {handleCheck.message}
-                      </p>
-                    )}
-                    <div className="flex items-center justify-end gap-2 pt-1">
-                      <button
-                        type="button"
-                        disabled={handleSaving}
-                        onClick={() => setEditingHandle(false)}
-                        className="min-h-9 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={
-                          handleSaving ||
-                          handleCheck.checking ||
-                          handleCheck.available === false ||
-                          !normalizedDraft ||
-                          handleUnchanged
-                        }
-                        className="btn-primary min-h-9 rounded-md px-3.5 py-1.5 text-xs font-medium disabled:opacity-55"
-                      >
-                        {handleSaving ? 'Saving…' : 'Save username'}
-                      </button>
-                    </div>
-                  </div>
-                </motion.form>
+                  <UsernameEditor
+                    className="mt-3.5"
+                    onCancel={() => setEditingHandle(false)}
+                    onSaved={(savedUsername) => {
+                      setEditingHandle(false);
+                      setHandleStatus(`Username saved as @${savedUsername}`);
+                      if (handleStatusTimerRef.current !== null) {
+                        window.clearTimeout(handleStatusTimerRef.current);
+                      }
+                      handleStatusTimerRef.current = window.setTimeout(
+                        () => setHandleStatus(null),
+                        3500
+                      );
+                    }}
+                  />
+                </motion.div>
               )}
             </AnimatePresence>
 
@@ -554,11 +391,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </p>
             )}
           </section>
-        </aside>
 
-        {/* Main Settings Sections */}
-        <div className="space-y-6 lg:col-span-8">
-          {/* Circle Privacy */}
+          {/* Friend Privacy */}
           {!firebaseAvailable ? (
             <section
               id="settings-privacy"
@@ -569,36 +403,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 id="settings-privacy-heading"
                 className="font-display text-xl font-medium text-[var(--text-primary)]"
               >
-                Circle privacy
+                Friend privacy
               </h2>
               <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
-                Reading Circle privacy settings require Firebase cloud sync to be configured.
+                Friend privacy settings require Firebase cloud sync to be configured.
               </p>
             </section>
           ) : !user ? (
             <section
               id="settings-privacy"
-              className="folio-sheet scroll-mt-20 space-y-3 p-5 sm:p-6"
+              className="folio-sheet scroll-mt-20 space-y-1.5 p-5 sm:p-6"
               aria-labelledby="settings-privacy-heading"
             >
               <h2
                 id="settings-privacy-heading"
                 className="font-display text-xl font-medium text-[var(--text-primary)]"
               >
-                Circle privacy
+                Friend privacy
               </h2>
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-4">
-                <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
-                  Sign in to choose whether readers can find you and what accepted friends can see.
-                </p>
-                <button
-                  type="button"
-                  onClick={onOpenAccount}
-                  className="btn-primary inline-flex min-h-9 shrink-0 items-center justify-center rounded-md px-3.5 py-1.5 text-xs font-medium"
-                >
-                  Sign in
-                </button>
-              </div>
+              <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
+                Sign in above to manage whether people can find you in search, what friends can see,
+                and your blocked users list.
+              </p>
             </section>
           ) : (
             <div id="settings-privacy" className="scroll-mt-20">
@@ -606,7 +432,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           )}
 
-          {/* Theme Swatches */}
+          {/* Appearance */}
           <section
             id="settings-appearance"
             className="folio-sheet scroll-mt-20 p-5 sm:p-6"
@@ -619,7 +445,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               Appearance
             </h2>
             <p className="mt-1 text-xs text-[var(--text-secondary)]">
-              Choose the paper and ink palette for reading and logging.
+              Choose your preferred color theme.
             </p>
 
             <fieldset className="mt-4">
@@ -707,7 +533,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </fieldset>
           </section>
 
-          {/* Preferences */}
+          {/* Reading Streak & Feedback */}
           <section
             id="settings-cadence"
             className="folio-sheet scroll-mt-20 space-y-3.5 p-5 sm:p-6"
@@ -718,7 +544,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 id="settings-cadence-heading"
                 className="font-display text-xl font-medium text-[var(--text-primary)]"
               >
-                Reading cadence & feedback
+                Reading streak &amp; feedback
               </h2>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">
                 Control streak grace rules and milestone animations.
@@ -728,10 +554,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <label className="flex cursor-pointer items-start justify-between gap-4 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3.5">
               <div>
                 <span className="block text-sm font-medium text-[var(--text-primary)]">
-                  Sabbath grace day (1 rest day per week)
+                  Rest day grace (1 rest day per week)
                 </span>
                 <span className="mt-0.5 block text-xs text-[var(--text-secondary)]">
-                  Preserves your reading streak if you miss up to one day in a 7-day window.
+                  Keeps your reading streak active if you miss up to one day in any 7-day window.
                 </span>
               </div>
               <input
@@ -750,7 +576,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   Milestone celebrations
                 </span>
                 <span className="mt-0.5 block text-xs text-[var(--text-secondary)]">
-                  Show subtle bursts when finishing a book or unlocking major seals.
+                  Show subtle bursts when finishing a book or unlocking major milestones.
                 </span>
               </div>
               <input
@@ -764,7 +590,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </label>
           </section>
 
-          {/* Data Backup & Sample Journey */}
+          {/* Backup & Data */}
           <section
             id="settings-data"
             className="folio-sheet scroll-mt-20 space-y-4 p-5 sm:p-6"
@@ -775,10 +601,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 id="settings-data-heading"
                 className="font-display text-xl font-medium text-[var(--text-primary)]"
               >
-                Data & portability
+                Backup &amp; data
               </h2>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                Export or restore your reading ledger as portable JSON, or try a sample journey.
+                Export or restore your reading history as JSON, or try sample data.
               </p>
             </div>
 
@@ -813,14 +639,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="button"
                 onClick={() => {
                   void activateDemoJourney().then(() => {
-                    setStatusMsg('Loaded sample reading journey.');
+                    setStatusMsg('Loaded sample reading data.');
                     setErrorMsg(null);
                   });
                 }}
                 className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] hover:border-[var(--border-strong)] sm:min-h-9"
               >
                 <BookOpen className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
-                <span>Load sample journey</span>
+                <span>Load sample data</span>
               </button>
             </div>
 
@@ -861,7 +687,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--color-crimson)] bg-[var(--bg-surface)] p-3 text-xs"
                   >
                     <span className="font-medium text-[var(--text-primary)]">
-                      Permanently erase all logs and seals?
+                      Permanently erase all readings and milestones?
                     </span>
                     <div className="flex gap-2">
                       <button
@@ -905,7 +731,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   App updates
                 </h2>
                 <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                  Keep Selah current while preserving all saved reading logs.
+                  Keep Selah current while keeping all your saved readings intact.
                 </p>
               </div>
               <span className="font-mono text-xs text-[var(--text-secondary)]">

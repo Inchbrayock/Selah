@@ -4,8 +4,12 @@ import { Award, BookOpen, CalendarCheck, Flame, TrendingUp, Users } from 'lucide
 import { BOOKS_BY_ID, DIVISION_META_BY_ID } from '../../data/bibleCanon';
 import { formatPlainDate } from '../../lib/dates';
 import { FOLIO_EASE, SPRING_PROGRESS, SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
-import { formatChapterRanges } from '../../lib/progress';
-import { useBibleStore } from '../../store/useBibleStore';
+import { formatChapterRanges, formatPercent } from '../../lib/progress';
+import {
+  useAccountSync,
+  useFriendsStore,
+  useReadingData,
+} from '../../store/useBibleStore';
 import type { AchievementStatus } from '../../types/bible';
 import { MedallionIcon } from '../achievements/MedallionIcon';
 import { AnimatedNumber } from '../ui/AnimatedNumber';
@@ -25,28 +29,15 @@ interface DashboardViewProps {
   onOpenFriends?: () => void;
 }
 
-function formatPercent(read: number, total: number): string {
-  if (total <= 0) return '0%';
-  const pct = (read / total) * 100;
-  return `${pct.toFixed(pct > 0 && pct < 10 ? 1 : 0)}%`;
-}
-
 export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenBook,
   onInspectAchievement,
   onNavigateTab,
   onOpenFriends,
 }) => {
-  const {
-    user,
-    summary,
-    achievements,
-    logs,
-    preferences,
-    friends,
-    incomingRequests,
-    activateDemoJourney,
-  } = useBibleStore();
+  const { summary, achievements, logs, preferences, activateDemoJourney } = useReadingData();
+  const { user } = useAccountSync();
+  const { friends, incomingRequests, unreadEncouragementsCount, sharedPlans } = useFriendsStore();
 
   const litCircleCount = useMemo(
     () =>
@@ -57,6 +48,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           (conn.profile?.stats.currentStreak ?? 0) > 0
       ).length,
     [friends]
+  );
+
+  const pendingInvitesCount = useMemo(
+    () => sharedPlans.filter((sp) => sp.myMembership?.status === 'invited').length,
+    [sharedPlans]
   );
 
   const closestAchievement = useMemo(() => {
@@ -80,6 +76,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const otPct = formatPercent(summary.otChaptersRead, summary.otTotalChapters);
   const ntPct = formatPercent(summary.ntChaptersRead, summary.ntTotalChapters);
 
+  const showFriendsStrip =
+    Boolean(onOpenFriends) &&
+    Boolean(user) &&
+    (friends.length > 0 ||
+      incomingRequests.length > 0 ||
+      unreadEncouragementsCount > 0 ||
+      pendingInvitesCount > 0);
+
   return (
     <div className="space-y-6 sm:space-y-8">
       {/* First-time Opening Strip (Editorial, unboxed, calm) */}
@@ -96,11 +100,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="flex flex-col justify-between gap-4 sm:gap-5 lg:flex-row lg:items-end">
               <div className="max-w-[60ch]">
                 <h2 className="font-display text-2xl font-medium tracking-tight text-[var(--text-primary)] sm:text-[1.75rem]">
-                  A quiet ledger for daily Scripture reading
+                  Track your daily Bible reading
                 </h2>
                 <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)] sm:text-base">
-                  Record chapters across all 66 books, trace your rhythm across the year, and keep
-                  private study notes synced to your account or saved directly in your browser.
+                  Log chapters across all 66 books, follow reading plans, and keep private study
+                  notes saved on your device or synced to your account.
                 </p>
               </div>
               <div className="flex shrink-0 flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:gap-3">
@@ -121,7 +125,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   onClick={() => void activateDemoJourney()}
                   className="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface)] sm:min-h-10 sm:w-auto"
                 >
-                  Preview Sample Journey
+                  Try sample data
                 </motion.button>
               </div>
             </div>
@@ -129,98 +133,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Band 1: Canonical Progress Ledger + Signature 66-Book Proportional Bar */}
-      <section aria-labelledby="overview-heading" className="folio-sheet p-4 sm:p-8">
-        <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-[var(--border-subtle)] pb-4 sm:gap-4 sm:pb-5">
-          <div>
-            <h1
-              id="overview-heading"
-              className="font-display text-2xl font-medium tracking-tight text-[var(--text-primary)] sm:text-[2.15rem]"
-            >
-              Canonical Journey
-            </h1>
-            <p className="mt-1 text-sm text-[var(--text-secondary)] tabular-nums">
-              <AnimatedNumber value={summary.booksCompleted}>{summary.booksCompleted}</AnimatedNumber> of 66 books completed,{' '}
-              <AnimatedNumber value={summary.booksInProgress}>{summary.booksInProgress}</AnimatedNumber> in progress
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => onNavigateTab('library')}
-            className="tactile-press inline-flex min-h-9 items-center text-sm font-medium text-[var(--color-accent)] underline-offset-4 hover:underline"
-          >
-            Explore 66 books
-          </button>
-        </div>
-
-        {/* Typographic Ledger Metrics */}
-        <div className="grid grid-cols-2 border-b border-[var(--border-subtle)] sm:grid-cols-3 sm:divide-x sm:divide-[var(--border-subtle)]">
-          <div className="col-span-2 border-b border-[var(--border-subtle)] py-4 sm:col-span-1 sm:border-b-0 sm:py-5 sm:pr-6">
-            <p className="text-xs font-medium text-[var(--text-secondary)]">Whole Bible</p>
-            <div className="mt-1 flex items-baseline gap-3">
-              <span className="font-display text-3xl font-medium tracking-tight tabular-nums text-[var(--text-primary)] sm:text-4xl">
-                <AnimatedNumber value={wholePct}>{wholePct}</AnimatedNumber>
-              </span>
-              <span className="text-sm text-[var(--text-secondary)] tabular-nums">
-                <AnimatedNumber value={summary.totalChaptersRead}>
-                  {summary.totalChaptersRead.toLocaleString()}
-                </AnimatedNumber>{' '}
-                / {summary.totalChapters.toLocaleString()} ch
-              </span>
-            </div>
-          </div>
-
-          <div className="border-r border-[var(--border-subtle)] py-4 pr-3 sm:border-r-0 sm:px-6 sm:py-5">
-            <p className="text-xs font-medium text-[var(--text-secondary)]">Old Testament</p>
-            <div className="mt-1 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
-              <span className="font-display text-2xl font-medium tracking-tight tabular-nums text-[var(--text-primary)] sm:text-4xl">
-                <AnimatedNumber value={otPct}>{otPct}</AnimatedNumber>
-              </span>
-              <span className="text-xs text-[var(--text-secondary)] tabular-nums sm:text-sm">
-                <AnimatedNumber value={summary.otChaptersRead}>
-                  {summary.otChaptersRead.toLocaleString()}
-                </AnimatedNumber>{' '}
-                / {summary.otTotalChapters.toLocaleString()} ch
-              </span>
-            </div>
-          </div>
-
-          <div className="py-4 pl-3 sm:py-5 sm:pl-6">
-            <p className="text-xs font-medium text-[var(--text-secondary)]">New Testament</p>
-            <div className="mt-1 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
-              <span className="font-display text-2xl font-medium tracking-tight tabular-nums text-[var(--text-primary)] sm:text-4xl">
-                <AnimatedNumber value={ntPct}>{ntPct}</AnimatedNumber>
-              </span>
-              <span className="text-xs text-[var(--text-secondary)] tabular-nums sm:text-sm">
-                <AnimatedNumber value={summary.ntChaptersRead}>
-                  {summary.ntChaptersRead.toLocaleString()}
-                </AnimatedNumber>{' '}
-                / {summary.ntTotalChapters.toLocaleString()} ch
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* 66-Book Proportional Spine Bar & 8-Division Key */}
-        <CanonicalSpineBar onOpenBook={onOpenBook} />
-      </section>
-
-      {/* Band 2: Reading Desk — Log a Reading (7) paired with Rhythm & Next Seal (5) */}
+      {/* Band 1: Action-First — Log a Reading (7) paired with Streak & Next Milestone (5) */}
       <div className="grid gap-6 sm:gap-8 lg:grid-cols-12 lg:items-stretch">
         <div className="lg:col-span-7">
-          <QuickLogCard onOpenBook={onOpenBook} />
+          <QuickLogCard onOpenBook={onOpenBook} headingLevel="h1" />
         </div>
 
         <aside
           className="flex flex-col gap-5 sm:gap-6 lg:col-span-5"
-          aria-label="Reading rhythm and next seal"
+          aria-label="Reading streak and next milestone"
         >
-          {/* Streak & Pace Ledger */}
+          {/* Reading Streak Card */}
           <section className="folio-sheet flex flex-1 flex-col justify-between p-4 sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-xl font-medium text-[var(--text-primary)]">
-                  Reading Rhythm
+                  Reading Streak
                 </h2>
                 <div className="mt-1.5 flex items-baseline gap-2">
                   <span className="font-display text-3xl font-medium tabular-nums text-[var(--text-primary)]">
@@ -268,7 +196,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <CalendarCheck className="h-3.5 w-3.5" aria-hidden="true" />
                 {preferences.streakGraceEnabled
                   ? summary.graceUsedThisWeek
-                    ? 'Sabbath grace active this week'
+                    ? 'Rest day grace active this week'
                     : '1 rest day per week grace enabled'
                   : 'Strict daily streak mode'}
               </span>
@@ -281,7 +209,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </section>
 
-          {/* Closest Seal Spotlight */}
+          {/* Closest Milestone Spotlight */}
           {closestAchievement ? (
             <motion.button
               type="button"
@@ -300,7 +228,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <div className="flex items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-1 text-xs font-medium text-[var(--color-accent)]">
                     <Award className="h-3.5 w-3.5" aria-hidden="true" />
-                    Next seal
+                    Next milestone
                   </span>
                   <span className="text-xs font-medium tabular-nums text-[var(--text-secondary)]">
                     {closestAchievement.current}/{closestAchievement.target}
@@ -328,7 +256,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="folio-sheet flex w-full items-center justify-between p-4 text-left transition-colors hover:border-[var(--border-strong)]"
             >
               <div>
-                <p className="text-xs font-medium text-[var(--color-accent)]">Hall of Seals</p>
+                <p className="text-xs font-medium text-[var(--color-accent)]">Milestones</p>
                 <p className="font-display text-lg font-medium text-[var(--text-primary)]">
                   {unlockedCount} of {achievements.length} unlocked
                 </p>
@@ -339,7 +267,83 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </aside>
       </div>
 
-      {/* Band 3: Continue Reading & Active Plan (7) paired with Recent Sessions (5) */}
+      {/* Band 2: Bible Progress + Signature 66-Book Proportional Bar */}
+      <section aria-labelledby="overview-heading" className="folio-sheet p-4 sm:p-8">
+        <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-[var(--border-subtle)] pb-4 sm:gap-4 sm:pb-5">
+          <div>
+            <h2
+              id="overview-heading"
+              className="font-display text-2xl font-medium tracking-tight text-[var(--text-primary)] sm:text-[1.95rem]"
+            >
+              Bible Progress
+            </h2>
+            <p className="mt-1 text-sm text-[var(--text-secondary)] tabular-nums">
+              <AnimatedNumber value={summary.booksCompleted}>{summary.booksCompleted}</AnimatedNumber> of 66 books completed,{' '}
+              <AnimatedNumber value={summary.booksInProgress}>{summary.booksInProgress}</AnimatedNumber> in progress
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigateTab('library')}
+            className="tactile-press inline-flex min-h-9 items-center text-sm font-medium text-[var(--color-accent)] underline-offset-4 hover:underline"
+          >
+            Browse all 66 books
+          </button>
+        </div>
+
+        {/* Progress Metrics */}
+        <div className="grid grid-cols-2 border-b border-[var(--border-subtle)] sm:grid-cols-3 sm:divide-x sm:divide-[var(--border-subtle)]">
+          <div className="col-span-2 border-b border-[var(--border-subtle)] py-4 sm:col-span-1 sm:border-b-0 sm:py-5 sm:pr-6">
+            <p className="text-xs font-medium text-[var(--text-secondary)]">Whole Bible</p>
+            <div className="mt-1 flex items-baseline gap-3">
+              <span className="font-display text-3xl font-medium tracking-tight tabular-nums text-[var(--text-primary)] sm:text-4xl">
+                <AnimatedNumber value={wholePct}>{wholePct}</AnimatedNumber>
+              </span>
+              <span className="text-sm text-[var(--text-secondary)] tabular-nums">
+                <AnimatedNumber value={summary.totalChaptersRead}>
+                  {summary.totalChaptersRead.toLocaleString()}
+                </AnimatedNumber>{' '}
+                / {summary.totalChapters.toLocaleString()} ch
+              </span>
+            </div>
+          </div>
+
+          <div className="border-r border-[var(--border-subtle)] py-4 pr-3 sm:border-r-0 sm:px-6 sm:py-5">
+            <p className="text-xs font-medium text-[var(--text-secondary)]">Old Testament</p>
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+              <span className="font-display text-2xl font-medium tracking-tight tabular-nums text-[var(--text-primary)] sm:text-4xl">
+                <AnimatedNumber value={otPct}>{otPct}</AnimatedNumber>
+              </span>
+              <span className="text-xs text-[var(--text-secondary)] tabular-nums sm:text-sm">
+                <AnimatedNumber value={summary.otChaptersRead}>
+                  {summary.otChaptersRead.toLocaleString()}
+                </AnimatedNumber>{' '}
+                / {summary.otTotalChapters.toLocaleString()} ch
+              </span>
+            </div>
+          </div>
+
+          <div className="py-4 pl-3 sm:py-5 sm:pl-6">
+            <p className="text-xs font-medium text-[var(--text-secondary)]">New Testament</p>
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+              <span className="font-display text-2xl font-medium tracking-tight tabular-nums text-[var(--text-primary)] sm:text-4xl">
+                <AnimatedNumber value={ntPct}>{ntPct}</AnimatedNumber>
+              </span>
+              <span className="text-xs text-[var(--text-secondary)] tabular-nums sm:text-sm">
+                <AnimatedNumber value={summary.ntChaptersRead}>
+                  {summary.ntChaptersRead.toLocaleString()}
+                </AnimatedNumber>{' '}
+                / {summary.ntTotalChapters.toLocaleString()} ch
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* 66-Book Proportional Progress Bar & 8-Division Key */}
+        <CanonicalSpineBar onOpenBook={onOpenBook} />
+      </section>
+
+      {/* Band 3: Continue Reading & Active Plan (7) paired with Recent Readings (5) */}
       <div className="grid gap-6 sm:gap-8 lg:grid-cols-12 lg:items-stretch">
         <div className="lg:col-span-7">
           <ContinueReadingCard
@@ -359,7 +363,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 id="recent-sessions-heading"
                 className="font-display text-xl font-medium text-[var(--text-primary)]"
               >
-                Recent Sessions
+                Recent Readings
               </h2>
               <button
                 type="button"
@@ -372,7 +376,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             {recentLogs.length === 0 ? (
               <p className="mt-4 text-sm leading-relaxed text-[var(--text-secondary)]">
-                Your logged chapters and reflections will gather here as you read.
+                Your logged chapters and notes will appear here as you read.
               </p>
             ) : (
               <ul className="mt-2 divide-y divide-[var(--border-subtle)]/70">
@@ -427,20 +431,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="mt-4 flex items-center justify-between border-t border-[var(--border-subtle)] pt-3 text-xs text-[var(--text-secondary)] tabular-nums">
             <span>
               <AnimatedNumber value={summary.totalSessions}>{summary.totalSessions}</AnimatedNumber>{' '}
-              {summary.totalSessions === 1 ? 'session' : 'sessions'} recorded
+              {summary.totalSessions === 1 ? 'reading' : 'readings'} logged
             </span>
             <span>
               <AnimatedNumber value={summary.notesCount}>{summary.notesCount}</AnimatedNumber>{' '}
-              {summary.notesCount === 1 ? 'reflection' : 'reflections'}
+              {summary.notesCount === 1 ? 'note' : 'notes'}
             </span>
           </div>
         </section>
       </div>
 
-      {/* Quiet Reading Circle summary strip when signed in with friends or pending invites */}
-      {onOpenFriends && user && (friends.length > 0 || incomingRequests.length > 0) && (
+      {/* Friends summary strip when signed in with friends or pending notifications */}
+      {showFriendsStrip && onOpenFriends && (
         <section
-          aria-label="Reading Circle summary"
+          aria-label="Friends summary"
           className="folio-sheet flex flex-col justify-between gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:px-5 sm:py-4"
         >
           <div className="flex min-w-0 items-start gap-3 sm:items-center">
@@ -450,19 +454,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="font-display text-base font-medium text-[var(--text-primary)]">
-                  Reading Circle
+                  Friends
                 </h2>
                 {incomingRequests.length > 0 && (
                   <span className="inline-flex items-center rounded-full bg-[var(--color-accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-accent)] tabular-nums">
-                    {incomingRequests.length} incoming{' '}
+                    {incomingRequests.length}{' '}
                     {incomingRequests.length === 1 ? 'request' : 'requests'}
+                  </span>
+                )}
+                {unreadEncouragementsCount > 0 && (
+                  <span className="inline-flex items-center rounded-full bg-[var(--color-sage-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-sage)] tabular-nums">
+                    {unreadEncouragementsCount}{' '}
+                    {unreadEncouragementsCount === 1 ? 'encouragement' : 'encouragements'}
+                  </span>
+                )}
+                {pendingInvitesCount > 0 && (
+                  <span className="inline-flex items-center rounded-full bg-[var(--color-lamp-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-primary)] tabular-nums">
+                    {pendingInvitesCount}{' '}
+                    {pendingInvitesCount === 1 ? 'plan invite' : 'plan invites'}
                   </span>
                 )}
               </div>
               <p className="mt-0.5 text-xs text-[var(--text-secondary)] tabular-nums">
                 {friends.length > 0
-                  ? `${friends.length} ${friends.length === 1 ? 'friend' : 'friends'} connected, ${litCircleCount} ${litCircleCount === 1 ? 'lamp' : 'lamps'} lit today`
-                  : 'Review your incoming Reading Circle invitation'}
+                  ? `${friends.length} ${friends.length === 1 ? 'friend' : 'friends'} connected · ${litCircleCount} active ${litCircleCount === 1 ? 'streak' : 'streaks'}`
+                  : 'Review your pending friend invitation'}
               </p>
             </div>
           </div>
@@ -472,12 +488,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             onClick={onOpenFriends}
             className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3.5 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface)]"
           >
-            Open Reading Circle
+            Open Friends
           </button>
         </section>
       )}
 
-      {/* Band 4: 52-Week Heatmap */}
+      {/* Band 4: Reading Activity Heatmap */}
       <ReadingHeatmap />
     </div>
   );

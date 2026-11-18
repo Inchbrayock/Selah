@@ -1,4 +1,12 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Capacitor } from '@capacitor/core';
 import {
   canSafelyAutoApplyUpdate,
@@ -446,22 +454,40 @@ export const AppUpdaterProvider: React.FC<{
     };
   }, [ready, checkForUpdates, currentVersion]);
 
-  const value: AppUpdaterContextValue = {
-    currentVersion,
-    currentBuild,
-    isAndroidNative,
-    autoUpdateEnabled,
-    setAutoUpdateEnabled,
-    status,
-    downloadProgress,
-    availableUpdate,
-    needsInstallPermission,
-    bannerDismissed,
-    errorMessage,
-    checkForUpdates,
-    applyUpdate,
-    dismissBanner,
-  };
+  const value = useMemo<AppUpdaterContextValue>(
+    () => ({
+      currentVersion,
+      currentBuild,
+      isAndroidNative,
+      autoUpdateEnabled,
+      setAutoUpdateEnabled,
+      status,
+      downloadProgress,
+      availableUpdate,
+      needsInstallPermission,
+      bannerDismissed,
+      errorMessage,
+      checkForUpdates,
+      applyUpdate,
+      dismissBanner,
+    }),
+    [
+      currentVersion,
+      currentBuild,
+      isAndroidNative,
+      autoUpdateEnabled,
+      setAutoUpdateEnabled,
+      status,
+      downloadProgress,
+      availableUpdate,
+      needsInstallPermission,
+      bannerDismissed,
+      errorMessage,
+      checkForUpdates,
+      applyUpdate,
+      dismissBanner,
+    ]
+  );
 
   return <AppUpdaterContext.Provider value={value}>{children}</AppUpdaterContext.Provider>;
 };

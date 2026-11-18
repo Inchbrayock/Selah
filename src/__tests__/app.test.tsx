@@ -11,17 +11,17 @@ function getWholeBibleChapterReadout(chaptersRead: number) {
   );
 }
 
-describe('Selah Bible Sanctuary App UI', () => {
+describe('Selah Bible Tracker App UI', () => {
   beforeEach(() => {
     localStorage.clear();
   });
 
-  it('renders Sanctuary dashboard, loads sample journey, and navigates all views', async () => {
+  it('renders Home dashboard, loads sample data, and navigates all views', async () => {
     render(<App />);
 
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
-    const previewBtn = screen.getByRole('button', { name: /Preview Sample Journey/i });
+    const previewBtn = screen.getByRole('button', { name: /Try sample data/i });
     fireEvent.click(previewBtn);
 
     await waitFor(() => {
@@ -32,8 +32,9 @@ describe('Selah Bible Sanctuary App UI', () => {
     expect(header).not.toBeNull();
     expect(header?.textContent).not.toMatch(/1,189|134|12d|streak/i);
 
-    fireEvent.click(screen.getByRole('button', { name: /Books & Chapters/i }));
-    expect(await screen.findByText(/Scripture Library/i)).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    fireEvent.click(within(nav).getByRole('button', { name: /^Books$/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: /^Books$/i })).toBeInTheDocument();
     expect(screen.getByText('Genesis')).toBeInTheDocument();
 
     const search = screen.getByLabelText(/Search Bible books/i);
@@ -41,18 +42,18 @@ describe('Selah Bible Sanctuary App UI', () => {
     expect(screen.getByText('Psalms')).toBeInTheDocument();
     expect(screen.queryByText('Revelation')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Hall of Seals/i }));
-    expect(await screen.findByText(/Illuminated Hall of Seals/i)).toBeInTheDocument();
+    fireEvent.click(within(nav).getByRole('button', { name: /^Milestones$/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: /^Milestones$/i })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Journal & Plans/i }));
+    fireEvent.click(within(nav).getByRole('button', { name: /Journal & Plans/i }));
     expect(await screen.findByText(/Reading Journal/i)).toBeInTheDocument();
   });
 
   it('filters Log History entries by book and chapter, note, and displayed date', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Preview Sample Journey/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Try sample data/i }));
     await waitFor(() => {
       expect(screen.getByText(/days streak/i)).toBeInTheDocument();
     });
@@ -84,10 +85,16 @@ describe('Selah Bible Sanctuary App UI', () => {
     expect(screen.getByText(/Genesis 1–10/i)).toBeInTheDocument();
   });
 
-  it('logs a chapter via Quick Log, unlocks Open the Scroll seal, and opens Book chapter grid', async () => {
+  it('logs a chapter via Quick Log, syncs Quick Log with selected book, unlocks Open the Scroll, and opens Book chapter grid', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
+    // Switching the book selector updates the 1-tap Quick Log button to match
+    fireEvent.change(screen.getByLabelText(/^Book$/i), { target: { value: 'genesis' } });
+    expect(screen.getByRole('button', { name: /Quick Log: Gen 1/i })).toBeInTheDocument();
+
+    // Switch back to John and tap Quick Log
+    fireEvent.change(screen.getByLabelText(/^Book$/i), { target: { value: 'john' } });
     const quickLogBtn = screen.getByRole('button', { name: /Quick Log: John 1/i });
     fireEvent.click(quickLogBtn);
 
@@ -97,11 +104,12 @@ describe('Selah Bible Sanctuary App UI', () => {
 
     expect(await screen.findByText(/^Open the Scroll$/i)).toBeInTheDocument();
 
-    // Unlocked seals count is omitted from the navigation bar on both mobile and desktop
+    // Unlocked count is omitted from the navigation bar on both mobile and desktop
     expect(screen.queryByTestId('nav-seals-count')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Hall of Seals/i })).not.toHaveTextContent('1');
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    expect(within(nav).getByRole('button', { name: /^Milestones$/i })).not.toHaveTextContent('1');
 
-    fireEvent.click(screen.getByRole('button', { name: /Open John chapter grid/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Open John chapters/i }));
     expect(await screen.findByRole('heading', { name: 'John' })).toBeInTheDocument();
 
     const ch2Btn = screen.getByRole('button', { name: /^2$/ });
@@ -114,36 +122,36 @@ describe('Selah Bible Sanctuary App UI', () => {
 
   it('opens dedicated Settings page from profile popover, switches color scheme, and navigates back', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole('button', { name: /Sign in to sync your Sanctuary account/i })
+      screen.getByRole('button', { name: /Sign in or open account menu/i })
     );
     const popover = await screen.findByTestId('account-popover');
-    fireEvent.click(await screen.findByRole('button', { name: /Settings/i }));
+    fireEvent.click(within(popover).getByRole('button', { name: /Settings/i }));
 
     expect(
-      await screen.findByRole('heading', { level: 1, name: /Sanctuary Settings/i })
+      await screen.findByRole('heading', { level: 1, name: /^Settings$/i })
     ).toBeInTheDocument();
     await waitFor(() => {
       expect(popover).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Vesper Candlelight/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Dark/i }));
     expect(
       document.querySelector('meta[name="color-scheme"]')?.getAttribute('content')
     ).toBe('dark');
     expect(localStorage.getItem('selah-color-scheme')).toBe('dark');
 
-    fireEvent.click(screen.getByRole('button', { name: /Back to Sanctuary/i }));
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Back to Home/i }));
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
   });
 
-  it('renders 66 proportional canonical book spines and opens book sheets from the bar', async () => {
+  it('renders 66 proportional book bars and opens book dialogs from the bar', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
-    const spineGroup = screen.getByRole('group', { name: /66-book canonical progress bar/i });
+    const spineGroup = screen.getByRole('group', { name: /66-book Bible progress bar/i });
     const spineButtons = spineGroup.querySelectorAll('button');
     expect(spineButtons).toHaveLength(66);
 
@@ -157,9 +165,9 @@ describe('Selah Bible Sanctuary App UI', () => {
 
   it('logs a multi-chapter range via touch-friendly Range tap mode inside BookDetailDialog', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Open John chapter grid/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Open John chapters/i }));
     expect(await screen.findByRole('heading', { name: 'John' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /^Range$/i }));
@@ -173,9 +181,9 @@ describe('Selah Bible Sanctuary App UI', () => {
     });
   });
 
-  it('logs the next day of the active reading plan from Sanctuary and opens Reading Plans directly', async () => {
+  it('logs the next day of the active reading plan from Home and opens Reading Plans directly', async () => {
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
     expect(screen.getByText(/Gospels & Acts Journey/i)).toBeInTheDocument();
     expect(screen.getByText(/Matthew 1–3/i)).toBeInTheDocument();
@@ -188,24 +196,27 @@ describe('Selah Bible Sanctuary App UI', () => {
     expect(screen.getByText(/Matthew 4–6/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /All plans/i }));
-    expect(await screen.findByText(/Guided Reading Plans/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: /Reading Plans/i })).toBeInTheDocument();
   });
 
-  it('filters 52-Week Reading Cadence heatmap, summary, and monthly table by year', async () => {
+  it('filters Reading Activity heatmap, summary, and human-readable monthly table by year', async () => {
     const today = todayPlainDate();
     const currentYear = Number(today.slice(0, 4));
     const pastYear = currentYear - 2;
     const pastDate = `${pastYear}-06-15`;
-    const pastMonth = `${pastYear}-06`;
-    const currentMonth = today.slice(0, 7);
+    const pastMonthLabel = formatPlainDate(`${pastYear}-06-01`, { month: 'short', year: 'numeric' });
+    const currentMonthLabel = formatPlainDate(`${today.slice(0, 7)}-01`, {
+      month: 'short',
+      year: 'numeric',
+    });
 
     render(<App />);
-    expect(await screen.findByText(/Canonical Journey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
-    // Log 3 chapters in a past year via Log a Reading form
-    fireEvent.change(screen.getByLabelText(/^Chapters$/i), { target: { value: '1-3' } });
+    // Use quick range chip 1–3 and log in a past year
+    fireEvent.click(screen.getByRole('button', { name: /^1–3$/i }));
     fireEvent.change(screen.getByLabelText(/^Date read$/i), { target: { value: pastDate } });
-    fireEvent.click(screen.getByRole('button', { name: /Log Passage/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Log Reading/i }));
 
     await waitFor(() => {
       expect(getWholeBibleChapterReadout(3)).toBeInTheDocument();
@@ -217,9 +228,9 @@ describe('Selah Bible Sanctuary App UI', () => {
       expect(getWholeBibleChapterReadout(4)).toBeInTheDocument();
     });
 
-    const heatmapSection = screen.getByRole('region', { name: /52-Week Reading Cadence/i });
+    const heatmapSection = screen.getByRole('region', { name: /Reading Activity/i });
     const yearFilterGroup = within(heatmapSection).getByRole('group', {
-      name: /Filter reading cadence by year/i,
+      name: /Filter reading activity by year/i,
     });
 
     const rollingBtn = within(yearFilterGroup).getByRole('button', { name: /Last 52 weeks/i });
@@ -231,13 +242,13 @@ describe('Selah Bible Sanctuary App UI', () => {
     // Default rolling 52 weeks excludes the 2-year-old session
     expect(rollingBtn).toHaveAttribute('aria-pressed', 'true');
     expect(
-      within(heatmapSection).getByText(/1 active reading day \(1 chapter\)/i)
+      within(heatmapSection).getByText(/1 active day \(1 chapter\)/i)
     ).toBeInTheDocument();
 
-    // Open Monthly summary table and verify rolling view shows currentMonth only
+    // Open Monthly summary table and verify human-readable month label (e.g. "Nov 2026")
     fireEvent.click(within(heatmapSection).getByRole('button', { name: /Monthly summary table/i }));
-    expect(await within(heatmapSection).findByText(currentMonth)).toBeInTheDocument();
-    expect(within(heatmapSection).queryByText(pastMonth)).not.toBeInTheDocument();
+    expect(await within(heatmapSection).findByText(currentMonthLabel)).toBeInTheDocument();
+    expect(within(heatmapSection).queryByText(pastMonthLabel)).not.toBeInTheDocument();
 
     // Switch to pastYear
     fireEvent.click(pastYearBtn);
@@ -249,11 +260,11 @@ describe('Selah Bible Sanctuary App UI', () => {
     ).toBeInTheDocument();
     expect(
       within(heatmapSection).getByText(
-        new RegExp(`In ${pastYear}: 1 active reading day \\(3 chapters\\)`, 'i')
+        new RegExp(`In ${pastYear}: 1 active day \\(3 chapters\\)`, 'i')
       )
     ).toBeInTheDocument();
-    expect(within(heatmapSection).getByText(pastMonth)).toBeInTheDocument();
-    expect(within(heatmapSection).queryByText(currentMonth)).not.toBeInTheDocument();
+    expect(within(heatmapSection).getByText(pastMonthLabel)).toBeInTheDocument();
+    expect(within(heatmapSection).queryByText(currentMonthLabel)).not.toBeInTheDocument();
 
     const pastSquare = within(heatmapSection).getByRole('button', {
       name: `${formatPlainDate(pastDate)}: 3 chapters read`,
@@ -271,7 +282,7 @@ describe('Selah Bible Sanctuary App UI', () => {
     fireEvent.click(currentYearBtn);
     expect(currentYearBtn).toHaveAttribute('aria-pressed', 'true');
     expect(
-      within(heatmapSection).getByText(/Tap or hover any day square to inspect chapters logged/i)
+      within(heatmapSection).getByText(/Tap or hover any square to see chapters logged/i)
     ).toBeInTheDocument();
     expect(
       within(heatmapSection).getByRole('grid', {
@@ -280,10 +291,10 @@ describe('Selah Bible Sanctuary App UI', () => {
     ).toBeInTheDocument();
     expect(
       within(heatmapSection).getByText(
-        new RegExp(`In ${currentYear}: 1 active reading day \\(1 chapter\\)`, 'i')
+        new RegExp(`In ${currentYear}: 1 active day \\(1 chapter\\)`, 'i')
       )
     ).toBeInTheDocument();
-    expect(within(heatmapSection).getByText(currentMonth)).toBeInTheDocument();
-    expect(within(heatmapSection).queryByText(pastMonth)).not.toBeInTheDocument();
+    expect(within(heatmapSection).getByText(currentMonthLabel)).toBeInTheDocument();
+    expect(within(heatmapSection).queryByText(pastMonthLabel)).not.toBeInTheDocument();
   });
 });

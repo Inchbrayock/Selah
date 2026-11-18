@@ -1,56 +1,162 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AnimatePresence, MotionConfig, motion } from 'motion/react';
-import { AchievementModal } from './components/achievements/AchievementModal';
-import { AchievementsView } from './components/achievements/AchievementsView';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { LazyMotion, MotionConfig, domAnimation, m } from 'motion/react';
 import { AccountDialog } from './components/auth/AccountDialog';
 import { MergeBanner } from './components/auth/MergeBanner';
-import { ProfilePhotoDialog } from './components/auth/ProfilePhotoDialog';
 import { DashboardView } from './components/dashboard/DashboardView';
-import { FriendsView } from './components/friends/FriendsView';
-import { JournalView } from './components/journal/JournalView';
-import { BookDetailDialog } from './components/library/BookDetailDialog';
-import { LibraryView } from './components/library/LibraryView';
-import { SettingsView } from './components/settings/SettingsView';
 import { AppHeader, type AppTab, type PrimaryTab } from './components/ui/AppHeader';
 import { CelebrationToast } from './components/ui/CelebrationToast';
 import { UpdateBanner } from './components/ui/UpdateBanner';
 import { FOLIO_EASE } from './lib/motion';
 import { hideNativeSplashScreen, subscribeNativeBackButton } from './lib/nativeShell';
 import { AppUpdaterProvider } from './lib/useAppUpdater';
-import { BibleStoreProvider, useBibleStore } from './store/useBibleStore';
+import {
+  BibleStoreProvider,
+  useAccountSync,
+  useFriendsStore,
+  useReadingData,
+  useUiFeedback,
+} from './store/useBibleStore';
 import type { AchievementStatus } from './types/bible';
 
+const LibraryView = lazy(() =>
+  import('./components/library/LibraryView').then((mod) => ({ default: mod.LibraryView }))
+);
+const AchievementsView = lazy(() =>
+  import('./components/achievements/AchievementsView').then((mod) => ({
+    default: mod.AchievementsView,
+  }))
+);
+const JournalView = lazy(() =>
+  import('./components/journal/JournalView').then((mod) => ({ default: mod.JournalView }))
+);
+const FriendsView = lazy(() =>
+  import('./components/friends/FriendsView').then((mod) => ({ default: mod.FriendsView }))
+);
+const SettingsView = lazy(() =>
+  import('./components/settings/SettingsView').then((mod) => ({ default: mod.SettingsView }))
+);
+const BookDetailDialog = lazy(() =>
+  import('./components/library/BookDetailDialog').then((mod) => ({
+    default: mod.BookDetailDialog,
+  }))
+);
+const AchievementModal = lazy(() =>
+  import('./components/achievements/AchievementModal').then((mod) => ({
+    default: mod.AchievementModal,
+  }))
+);
+const ProfilePhotoDialog = lazy(() =>
+  import('./components/auth/ProfilePhotoDialog').then((mod) => ({
+    default: mod.ProfilePhotoDialog,
+  }))
+);
+
 const PRIMARY_TAB_LABELS: Record<PrimaryTab, string> = {
-  dashboard: 'Sanctuary',
-  library: 'Books & Chapters',
-  achievements: 'Hall of Seals',
+  dashboard: 'Home',
+  library: 'Books',
+  achievements: 'Milestones',
   journal: 'Journal & Plans',
 };
 
 const TAB_TITLES: Record<AppTab, string> = {
-  dashboard: 'Sanctuary | Selah',
-  library: 'Books & Chapters | Selah',
-  achievements: 'Hall of Seals | Selah',
+  dashboard: 'Home | Selah',
+  library: 'Books | Selah',
+  achievements: 'Milestones | Selah',
   journal: 'Journal & Plans | Selah',
   settings: 'Settings | Selah',
-  friends: 'Reading Circle | Selah',
+  friends: 'Friends | Selah',
+};
+
+function parseHashRoute(hash: string): { tab: AppTab; journalSubTab?: 'journal' | 'plans' } | null {
+  const cleaned = hash.replace(/^#\/?/, '').trim().toLowerCase();
+  switch (cleaned) {
+    case 'home':
+    case 'dashboard':
+      return { tab: 'dashboard' };
+    case 'books':
+    case 'library':
+      return { tab: 'library' };
+    case 'milestones':
+    case 'achievements':
+      return { tab: 'achievements' };
+    case 'journal':
+      return { tab: 'journal', journalSubTab: 'journal' };
+    case 'plans':
+      return { tab: 'journal', journalSubTab: 'plans' };
+    case 'friends':
+      return { tab: 'friends' };
+    case 'settings':
+      return { tab: 'settings' };
+    default:
+      return null;
+  }
+}
+
+function routeToHash(tab: AppTab, journalSubTab: 'journal' | 'plans'): string {
+  switch (tab) {
+    case 'dashboard':
+      return '#home';
+    case 'library':
+      return '#books';
+    case 'achievements':
+      return '#milestones';
+    case 'journal':
+      return journalSubTab === 'plans' ? '#plans' : '#journal';
+    case 'friends':
+      return '#friends';
+    case 'settings':
+      return '#settings';
+  }
+}
+
+const ViewLoadingFallback: React.FC = () => (
+  <div className="folio-sheet p-8 text-center text-sm text-[var(--text-secondary)]">
+    Loading…
+  </div>
+);
+
+const LiveAnnouncer: React.FC = () => {
+  const { announcement } = useUiFeedback();
+  return (
+    <div aria-live="polite" aria-atomic="true" className="visually-hidden">
+      {announcement}
+    </div>
+  );
+};
+
+const CelebrationToastBridge: React.FC<{
+  onInspect: (status: AchievementStatus) => void;
+}> = ({ onInspect }) => {
+  const { unlockedQueue, dismissUnlockedAchievement } = useUiFeedback();
+  return (
+    <CelebrationToast
+      queue={unlockedQueue}
+      onInspect={onInspect}
+      onDismiss={dismissUnlockedAchievement}
+    />
+  );
 };
 
 const SanctuaryAppContent: React.FC = () => {
-  const {
-    ready,
-    user,
-    announcement,
-    unlockedQueue,
-    dismissUnlockedAchievement,
-  } = useBibleStore();
+  const { ready } = useReadingData();
+  const { user } = useAccountSync();
+  const { setFriendsDetailActive } = useFriendsStore();
 
-  const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
-  const [returnTab, setReturnTab] = useState<PrimaryTab>('dashboard');
-  const returnTabRef = useRef<PrimaryTab>('dashboard');
+  const initialRoute =
+    typeof window !== 'undefined' ? parseHashRoute(window.location.hash) : null;
+
+  const [activeTab, setActiveTab] = useState<AppTab>(initialRoute?.tab ?? 'dashboard');
+  const [returnTab, setReturnTab] = useState<PrimaryTab>(
+    initialRoute && initialRoute.tab !== 'settings' && initialRoute.tab !== 'friends'
+      ? initialRoute.tab
+      : 'dashboard'
+  );
+  const returnTabRef = useRef<PrimaryTab>(returnTab);
   returnTabRef.current = returnTab;
 
-  const [journalInitialTab, setJournalInitialTab] = useState<'journal' | 'plans'>('journal');
+  const [journalInitialTab, setJournalInitialTab] = useState<'journal' | 'plans'>(
+    initialRoute?.journalSubTab ?? 'journal'
+  );
   const [openBookId, setOpenBookId] = useState<string | null>(null);
   const [inspectedAchievement, setInspectedAchievement] = useState<{
     status: AchievementStatus;
@@ -61,20 +167,51 @@ const SanctuaryAppContent: React.FC = () => {
   const accountAnchorRef = useRef<HTMLButtonElement | null>(null);
 
   const navigateToTab = useCallback(
-    (nextTab: AppTab, options?: { journalSubTab?: 'journal' | 'plans' }) => {
+    (
+      nextTab: AppTab,
+      options?: { journalSubTab?: 'journal' | 'plans'; skipHashPush?: boolean }
+    ) => {
+      const nextJournalSubTab = options?.journalSubTab ?? 'journal';
       if (nextTab === 'settings' || nextTab === 'friends') {
         setOpenBookId(null);
       } else {
         setReturnTab(nextTab);
-        setJournalInitialTab(options?.journalSubTab ?? 'journal');
+        setJournalInitialTab(nextJournalSubTab);
       }
       setActiveTab(nextTab);
-      if (typeof window !== 'undefined') {
-        window.scrollTo({ top: 0, behavior: 'auto' });
+      if (typeof window !== 'undefined' && !options?.skipHashPush) {
+        const targetHash = routeToHash(nextTab, nextJournalSubTab);
+        if (window.location.hash !== targetHash) {
+          window.history.pushState(null, '', targetHash);
+        }
       }
     },
     []
   );
+
+  // Only keep per-friend live Firestore profile listeners attached on screens that show them
+  useEffect(() => {
+    const needsFriendProfiles =
+      activeTab === 'dashboard' || activeTab === 'friends' || activeTab === 'journal';
+    setFriendsDetailActive(needsFriendProfiles);
+  }, [activeTab, setFriendsDetailActive]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleHashChange = () => {
+      const parsed = parseHashRoute(window.location.hash);
+      if (!parsed) {
+        navigateToTab('dashboard', { skipHashPush: true });
+        return;
+      }
+      navigateToTab(parsed.tab, {
+        journalSubTab: parsed.journalSubTab,
+        skipHashPush: true,
+      });
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [navigateToTab]);
 
   const backStateRef = useRef({
     inspectedAchievement,
@@ -141,6 +278,10 @@ const SanctuaryAppContent: React.FC = () => {
     }
   }, [activeTab]);
 
+  const handleInspectNewAchievement = useCallback((status: AchievementStatus) => {
+    setInspectedAchievement({ status, isNew: true });
+  }, []);
+
   return (
     <div className="min-h-dvh flex flex-col overflow-x-clip">
       <a href="#main-content" className="skip-link visually-hidden">
@@ -164,17 +305,16 @@ const SanctuaryAppContent: React.FC = () => {
         <MergeBanner />
         {!ready ? (
           <div className="folio-sheet p-8 text-center text-sm text-[var(--text-secondary)]">
-            Opening your reading ledger…
+            Loading your reading history…
           </div>
         ) : (
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.16, ease: FOLIO_EASE }}
-            >
+          <m.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.14, ease: FOLIO_EASE }}
+          >
+            <Suspense fallback={<ViewLoadingFallback />}>
               {activeTab === 'dashboard' && (
                 <DashboardView
                   onOpenBook={setOpenBookId}
@@ -194,7 +334,12 @@ const SanctuaryAppContent: React.FC = () => {
                 />
               )}
               {activeTab === 'journal' && (
-                <JournalView onOpenBook={setOpenBookId} initialSubTab={journalInitialTab} />
+                <JournalView
+                  onOpenBook={setOpenBookId}
+                  initialSubTab={journalInitialTab}
+                  onOpenAccount={() => setAccountOpen(true)}
+                  onOpenFriends={() => navigateToTab('friends')}
+                />
               )}
               {activeTab === 'settings' && (
                 <SettingsView
@@ -210,10 +355,11 @@ const SanctuaryAppContent: React.FC = () => {
                   onBack={() => navigateToTab(returnTab)}
                   backLabel={PRIMARY_TAB_LABELS[returnTab]}
                   onOpenAccount={() => setAccountOpen(true)}
+                  onNavigateToPlan={() => navigateToTab('journal', { journalSubTab: 'plans' })}
                 />
               )}
-            </motion.div>
-          </AnimatePresence>
+            </Suspense>
+          </m.div>
         )}
       </main>
 
@@ -224,49 +370,51 @@ const SanctuaryAppContent: React.FC = () => {
           </span>
           <span>
             {user
-              ? 'Synced Bible reading ledger across 66 books and 1,189 chapters.'
-              : 'Local-first Bible reading ledger with optional cloud account sync across 66 books and 1,189 chapters.'}
+              ? 'Synced Bible reading tracker across 66 books and 1,189 chapters.'
+              : 'Track your Bible reading across 66 books and 1,189 chapters, with optional cloud sync.'}
           </span>
         </div>
       </footer>
 
-      <BookDetailDialog bookId={openBookId} onClose={() => setOpenBookId(null)} />
+      {openBookId !== null && (
+        <Suspense fallback={null}>
+          <BookDetailDialog bookId={openBookId} onClose={() => setOpenBookId(null)} />
+        </Suspense>
+      )}
 
-      <AchievementModal
-        achievement={inspectedAchievement?.status ?? null}
-        isNewUnlock={inspectedAchievement?.isNew ?? false}
-        onClose={() => setInspectedAchievement(null)}
-      />
+      {inspectedAchievement !== null && (
+        <Suspense fallback={null}>
+          <AchievementModal
+            achievement={inspectedAchievement.status}
+            isNewUnlock={inspectedAchievement.isNew}
+            onClose={() => setInspectedAchievement(null)}
+          />
+        </Suspense>
+      )}
 
       <AccountDialog
         open={accountOpen}
         onClose={() => setAccountOpen(false)}
+        onOpenFriends={() => navigateToTab('friends')}
         onOpenSettings={() => navigateToTab('settings')}
         onEditPhoto={() => setPhotoEditorOpen(true)}
         anchorRef={accountAnchorRef}
       />
 
-      <ProfilePhotoDialog
-        open={photoEditorOpen && Boolean(user)}
-        onClose={() => setPhotoEditorOpen(false)}
-      />
+      {photoEditorOpen && Boolean(user) && (
+        <Suspense fallback={null}>
+          <ProfilePhotoDialog open={true} onClose={() => setPhotoEditorOpen(false)} />
+        </Suspense>
+      )}
 
-      <CelebrationToast
-        queue={unlockedQueue}
-        onInspect={(status) => setInspectedAchievement({ status, isNew: true })}
-        onDismiss={dismissUnlockedAchievement}
-      />
-
-      {/* Single centralized polite live region */}
-      <div aria-live="polite" aria-atomic="true" className="visually-hidden">
-        {announcement}
-      </div>
+      <CelebrationToastBridge onInspect={handleInspectNewAchievement} />
+      <LiveAnnouncer />
     </div>
   );
 };
 
 const SanctuaryShell: React.FC = () => {
-  const { ready } = useBibleStore();
+  const { ready } = useReadingData();
   return (
     <AppUpdaterProvider ready={ready}>
       <SanctuaryAppContent />
@@ -276,11 +424,13 @@ const SanctuaryShell: React.FC = () => {
 
 export function App() {
   return (
-    <MotionConfig reducedMotion="user">
-      <BibleStoreProvider>
-        <SanctuaryShell />
-      </BibleStoreProvider>
-    </MotionConfig>
+    <LazyMotion features={domAnimation}>
+      <MotionConfig reducedMotion="user">
+        <BibleStoreProvider>
+          <SanctuaryShell />
+        </BibleStoreProvider>
+      </MotionConfig>
+    </LazyMotion>
   );
 }
 

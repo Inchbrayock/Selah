@@ -1,5 +1,5 @@
-import { BIBLE_BOOKS } from './bibleCanon';
-import { diffCalendarDays, getDayOfWeek, getLocalHourFromIsoInstant, todayPlainDate } from '../lib/dates';
+import { BIBLE_BOOKS, NT_BOOKS, OT_BOOKS } from './bibleCanon';
+import { comparePlainDates, diffCalendarDays, getDayOfWeek, getLocalHourFromIsoInstant } from '../lib/dates';
 import { countConsecutiveSundays } from '../lib/progress';
 import type {
   AchievementDefinition,
@@ -7,7 +7,19 @@ import type {
   FellowshipStatsCounters,
 } from '../types/bible';
 
+const DIVISION_BOOK_IDS: Record<string, string[]> = {};
+for (const book of BIBLE_BOOKS) {
+  (DIVISION_BOOK_IDS[book.division] ??= []).push(book.id);
+}
+const OT_BOOK_IDS = OT_BOOKS.map((b) => b.id);
+const NT_BOOK_IDS = NT_BOOKS.map((b) => b.id);
+const PROPHET_BOOK_IDS = [
+  ...(DIVISION_BOOK_IDS['major-prophets'] ?? []),
+  ...(DIVISION_BOOK_IDS['minor-prophets'] ?? []),
+];
+
 function latestLogDate(ctx: AchievementEvalContext): string | null {
+  if (ctx.latestLogDate !== undefined) return ctx.latestLogDate;
   let latest: string | null = null;
   for (const log of ctx.logs) {
     if (!latest || log.readDate > latest) {
@@ -17,7 +29,16 @@ function latestLogDate(ctx: AchievementEvalContext): string | null {
   return latest;
 }
 
+function getSortedLogsAsc(ctx: AchievementEvalContext) {
+  return (
+    ctx.sortedLogsAsc ?? [...ctx.logs].sort((a, b) => comparePlainDates(a.readDate, b.readDate))
+  );
+}
+
 function nthConsecutiveSundayDate(ctx: AchievementEvalContext, targetCount: number): string | null {
+  if (targetCount === 4 && ctx.consecutiveSundays) {
+    return ctx.consecutiveSundays.fourthDate;
+  }
   const sundays = Array.from(
     new Set(ctx.logs.filter((l) => getDayOfWeek(l.readDate) === 7).map((l) => l.readDate))
   ).sort();
@@ -43,24 +64,25 @@ function latestReadDateForChapters(
   for (const req of requirements) {
     const bp = ctx.summary.bookProgressById[req.bookId];
     if (!bp) return null;
-    const targets =
-      req.chapters ??
-      Array.from({ length: bp.totalChapters }, (_, i) => i + 1);
-    for (const ch of targets) {
-      const state = bp.chapterMap[ch];
-      if (!state) return null;
-      if (!latest || state.firstReadDate > latest) {
-        latest = state.firstReadDate;
+    if (req.chapters) {
+      for (const ch of req.chapters) {
+        const state = bp.chapterMap[ch];
+        if (!state) return null;
+        if (!latest || state.firstReadDate > latest) {
+          latest = state.firstReadDate;
+        }
+      }
+    } else {
+      for (let ch = 1; ch <= bp.totalChapters; ch++) {
+        const state = bp.chapterMap[ch];
+        if (!state) return null;
+        if (!latest || state.firstReadDate > latest) {
+          latest = state.firstReadDate;
+        }
       }
     }
   }
   return latest;
-}
-
-function divisionRequirement(divisionId: string) {
-  return BIBLE_BOOKS.filter((b) => b.division === divisionId).map((b) => ({
-    bookId: b.id,
-  }));
 }
 
 function evaluateBooksCompletion(
@@ -91,8 +113,12 @@ function evaluateChapterThreshold(
   if (uniqueRead < threshold) {
     return { current: uniqueRead, unlockedAt: null };
   }
+  const precomputed = ctx.chapterThresholdDates?.get(threshold);
+  if (precomputed) {
+    return { current: threshold, unlockedAt: precomputed };
+  }
   const seen = new Set<string>();
-  const sorted = [...ctx.logs].sort((a, b) => a.readDate.localeCompare(b.readDate));
+  const sorted = getSortedLogsAsc(ctx);
   for (const log of sorted) {
     for (const ch of log.chapters) {
       seen.add(`${log.bookId}:${ch}`);
@@ -171,7 +197,7 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     id: 'hundred-chapters',
     title: 'Centurion of the Word',
     subtitle: '100 Unique Chapters',
-    description: 'Reach 100 unique chapters read across your sanctuary.',
+    description: 'Read and log 100 distinct chapters across the Bible.',
     scriptureEcho: '“Let the word of Christ dwell in you richly.” — Col 3:16',
     tier: 'silver',
     category: 'milestones',
@@ -251,11 +277,7 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     category: 'divisions',
     motif: 'tablets',
     target: 5,
-    evaluate: (ctx) =>
-      evaluateBooksCompletion(
-        ctx,
-        divisionRequirement('pentateuch').map((r) => r.bookId)
-      ),
+    evaluate: (ctx) => evaluateBooksCompletion(ctx, DIVISION_BOOK_IDS['pentateuch'] ?? []),
   },
   {
     id: 'chronicles-of-kings',
@@ -267,11 +289,7 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     category: 'divisions',
     motif: 'crown',
     target: 12,
-    evaluate: (ctx) =>
-      evaluateBooksCompletion(
-        ctx,
-        divisionRequirement('history').map((r) => r.bookId)
-      ),
+    evaluate: (ctx) => evaluateBooksCompletion(ctx, DIVISION_BOOK_IDS['history'] ?? []),
   },
   {
     id: 'sweet-psalmist',
@@ -301,11 +319,7 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     category: 'divisions',
     motif: 'lamp',
     target: 5,
-    evaluate: (ctx) =>
-      evaluateBooksCompletion(
-        ctx,
-        divisionRequirement('wisdom').map((r) => r.bookId)
-      ),
+    evaluate: (ctx) => evaluateBooksCompletion(ctx, DIVISION_BOOK_IDS['wisdom'] ?? []),
   },
   {
     id: 'voice-of-prophets',
@@ -317,11 +331,7 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     category: 'divisions',
     motif: 'flame',
     target: 17,
-    evaluate: (ctx) =>
-      evaluateBooksCompletion(ctx, [
-        ...divisionRequirement('major-prophets').map((r) => r.bookId),
-        ...divisionRequirement('minor-prophets').map((r) => r.bookId),
-      ]),
+    evaluate: (ctx) => evaluateBooksCompletion(ctx, PROPHET_BOOK_IDS),
   },
   {
     id: 'witness-of-gospels',
@@ -345,11 +355,7 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     category: 'divisions',
     motif: 'quill',
     target: 13,
-    evaluate: (ctx) =>
-      evaluateBooksCompletion(
-        ctx,
-        divisionRequirement('pauline').map((r) => r.bookId)
-      ),
+    evaluate: (ctx) => evaluateBooksCompletion(ctx, DIVISION_BOOK_IDS['pauline'] ?? []),
   },
   {
     id: 'new-testament-crown',
@@ -361,11 +367,7 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     category: 'divisions',
     motif: 'crown',
     target: 27,
-    evaluate: (ctx) =>
-      evaluateBooksCompletion(
-        ctx,
-        BIBLE_BOOKS.filter((b) => b.testament === 'NT').map((b) => b.id)
-      ),
+    evaluate: (ctx) => evaluateBooksCompletion(ctx, NT_BOOK_IDS),
   },
   {
     id: 'old-testament-pillar',
@@ -377,11 +379,7 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     category: 'divisions',
     motif: 'tablets',
     target: 39,
-    evaluate: (ctx) =>
-      evaluateBooksCompletion(
-        ctx,
-        BIBLE_BOOKS.filter((b) => b.testament === 'OT').map((b) => b.id)
-      ),
+    evaluate: (ctx) => evaluateBooksCompletion(ctx, OT_BOOK_IDS),
   },
 
   // ── Consistency & Rhythm ─────────────────────────────────────────
@@ -465,7 +463,7 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     motif: 'chalice',
     target: 4,
     evaluate: (ctx) => {
-      const best = countConsecutiveSundays(ctx.logs);
+      const best = ctx.consecutiveSundays?.best ?? countConsecutiveSundays(ctx.logs);
       return {
         current: Math.min(best, 4),
         unlockedAt: best >= 4 ? nthConsecutiveSundayDate(ctx, 4) : null,
@@ -485,12 +483,18 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     motif: 'quill',
     target: 10,
     evaluate: (ctx) => {
-      const notedLogs = ctx.logs
-        .filter((l) => l.note && l.note.trim().length > 0)
-        .sort((a, b) => a.readDate.localeCompare(b.readDate));
+      const sorted = getSortedLogsAsc(ctx);
+      let count = 0;
+      let tenthDate: string | null = null;
+      for (const log of sorted) {
+        if (log.note && log.note.trim().length > 0) {
+          count += 1;
+          if (count === 10) tenthDate = log.readDate;
+        }
+      }
       return {
-        current: Math.min(notedLogs.length, 10),
-        unlockedAt: notedLogs.length >= 10 ? notedLogs[9].readDate : null,
+        current: Math.min(count, 10),
+        unlockedAt: tenthDate,
       };
     },
   },
@@ -505,12 +509,18 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     motif: 'sunrise',
     target: 5,
     evaluate: (ctx) => {
-      const morningLogs = ctx.logs
-        .filter((l) => getLocalHourFromIsoInstant(l.loggedAt) < 8)
-        .sort((a, b) => a.readDate.localeCompare(b.readDate));
+      const sorted = getSortedLogsAsc(ctx);
+      let count = 0;
+      let fifthDate: string | null = null;
+      for (const log of sorted) {
+        if (getLocalHourFromIsoInstant(log.loggedAt) < 8) {
+          count += 1;
+          if (count === 5) fifthDate = log.readDate;
+        }
+      }
       return {
-        current: Math.min(morningLogs.length, 5),
-        unlockedAt: morningLogs.length >= 5 ? morningLogs[4].readDate : null,
+        current: Math.min(count, 5),
+        unlockedAt: fifthDate,
       };
     },
   },
@@ -527,12 +537,12 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     evaluate: (ctx) => evaluateSingleDayChapterCount(ctx, 10),
   },
 
-  // ── Secret & Special Seals ───────────────────────────────────────
+  // ── Secret & Special Milestones ──────────────────────────────────
   {
     id: 'longest-song',
     title: 'The Alphabet of Delight',
-    subtitle: 'Secret Seal · Psalm 119',
-    description: 'Read Psalm 119—the longest chapter in all of Scripture.',
+    subtitle: 'Secret · Psalm 119',
+    description: 'Read Psalm 119—the longest chapter in the Bible.',
     scriptureEcho: '“Oh how I love your law! It is my meditation all the day.” — Ps 119:97',
     tier: 'silver',
     category: 'special',
@@ -551,7 +561,7 @@ export const ACHIEVEMENTS_CATALOG: AchievementDefinition[] = [
     id: 'second-wind',
     title: 'Second Pass',
     subtitle: 'Re-Read a Complete Book',
-    description: 'Complete every chapter of any book at least twice across reading cycles.',
+    description: 'Complete every chapter of any book at least twice.',
     scriptureEcho: '“Therefore every scribe… brings out of his treasure what is new and what is old.” — Matt 13:52',
     tier: 'gold',
     category: 'special',
@@ -578,15 +588,15 @@ export interface FellowshipAchievementDefinition extends Omit<AchievementDefinit
 }
 
 /**
- * Optional bonus seals celebrating Reading Circle companionship.
- * Strictly separate from the 28 core seals so solo/offline readers always achieve 28/28.
+ * Optional bonus milestones for reading with friends.
+ * Strictly separate from the 28 core milestones so solo/offline readers always achieve 28/28.
  */
 export const FELLOWSHIP_SEALS_CATALOG: FellowshipAchievementDefinition[] = [
   {
     id: 'fellowship-first-friend',
     title: 'Iron Sharpens Iron',
-    subtitle: 'Join a Reading Circle',
-    description: 'Connect with 1 accepted friend in your Reading Circle.',
+    subtitle: 'Add a Friend',
+    description: 'Connect with your first friend on Selah.',
     scriptureEcho: '“Iron sharpens iron, and one man sharpens another.” — Prov 27:17',
     tier: 'bronze',
     category: 'fellowship',
@@ -598,8 +608,8 @@ export const FELLOWSHIP_SEALS_CATALOG: FellowshipAchievementDefinition[] = [
   {
     id: 'fellowship-read-together',
     title: 'Two Are Better Than One',
-    subtitle: 'Shared Plan Cohort',
-    description: 'Start or join a Read Together reading plan alongside friends.',
+    subtitle: 'Shared Reading Plan',
+    description: 'Start or join a Read Together plan with friends.',
     scriptureEcho: '“Two are better than one, because they have a good reward for their toil.” — Eccl 4:9',
     tier: 'silver',
     category: 'fellowship',
@@ -611,8 +621,8 @@ export const FELLOWSHIP_SEALS_CATALOG: FellowshipAchievementDefinition[] = [
   {
     id: 'fellowship-encourager',
     title: 'Word in Season',
-    subtitle: '3 Quiet Encouragements',
-    description: 'Send 3 quiet encouragement notes to friends in your Reading Circle.',
+    subtitle: '3 Encouragements Sent',
+    description: 'Send 3 encouragement notes to friends.',
     scriptureEcho: '“A word in season, how good it is!” — Prov 15:23',
     tier: 'silver',
     category: 'fellowship',
@@ -624,8 +634,8 @@ export const FELLOWSHIP_SEALS_CATALOG: FellowshipAchievementDefinition[] = [
   {
     id: 'fellowship-threefold-cord',
     title: 'A Threefold Cord',
-    subtitle: 'Three Circle Companions',
-    description: 'Read alongside 3 friends in your Reading Circle.',
+    subtitle: 'Three Friends',
+    description: 'Connect with 3 friends on Selah.',
     scriptureEcho: '“A threefold cord is not quickly broken.” — Eccl 4:12',
     tier: 'gold',
     category: 'fellowship',
@@ -635,7 +645,3 @@ export const FELLOWSHIP_SEALS_CATALOG: FellowshipAchievementDefinition[] = [
     evaluateFellowship: (stats) => stats.friendsPeak,
   },
 ];
-
-export function resolveFellowshipUnlockDate(unlocked: boolean): string | null {
-  return unlocked ? todayPlainDate() : null;
-}

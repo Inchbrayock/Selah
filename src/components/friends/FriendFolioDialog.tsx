@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Award, BookOpen, Compass, ShieldBan, UserMinus, X } from 'lucide-react';
+import { Award, BookOpen, Compass, ShieldBan, UserMinus, Users, X } from 'lucide-react';
 import { BOOKS_BY_ID, OT_TOTAL_CHAPTERS, NT_TOTAL_CHAPTERS, TOTAL_CANON_CHAPTERS } from '../../data/bibleCanon';
 import { formatPlainDate } from '../../lib/dates';
 import { formatUsernameHandle } from '../../lib/friends';
-import { useBibleStore } from '../../store/useBibleStore';
+import { formatPercent } from '../../lib/progress';
+import { useFriendsStore, useReadingData } from '../../store/useBibleStore';
 import type { FriendConnection } from '../../types/bible';
 import { InlineDeleteConfirm } from '../ui/InlineDeleteConfirm';
 import { ModalDialog } from '../ui/ModalDialog';
@@ -15,19 +16,16 @@ import { MiniCanonicalSpine } from './MiniCanonicalSpine';
 interface FriendFolioDialogProps {
   connection: FriendConnection | null;
   onClose: () => void;
-}
-
-function formatPct(read: number, total: number): string {
-  if (total <= 0) return '0%';
-  const pct = (read / total) * 100;
-  return `${pct.toFixed(pct > 0 && pct < 10 ? 1 : 0)}%`;
+  onInviteToPlan?: (friendUid: string) => void;
 }
 
 export const FriendFolioDialog: React.FC<FriendFolioDialogProps> = ({
   connection,
   onClose,
+  onInviteToPlan,
 }) => {
-  const { preferences, removeFriend, blockFriend } = useBibleStore();
+  const { preferences } = useReadingData();
+  const { removeFriend, blockFriend } = useFriendsStore();
   const [confirmAction, setConfirmAction] = useState<'remove' | 'block' | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -158,7 +156,7 @@ export const FriendFolioDialog: React.FC<FriendFolioDialogProps> = ({
               </div>
             ) : !sharing ? (
               <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 text-sm leading-relaxed text-[var(--text-secondary)]">
-                {connection.displayName} has paused sharing reading stats with their circle.
+                {connection.displayName} has paused sharing their reading stats with friends.
               </div>
             ) : (
               <>
@@ -169,7 +167,7 @@ export const FriendFolioDialog: React.FC<FriendFolioDialogProps> = ({
                         <p className="text-xs text-[var(--text-secondary)]">Whole Bible</p>
                         <div className="mt-0.5 flex items-baseline gap-2.5">
                           <span className="font-display text-2xl font-medium tabular-nums text-[var(--text-primary)] sm:text-3xl">
-                            {formatPct(profile.stats.totalChaptersRead, TOTAL_CANON_CHAPTERS)}
+                            {formatPercent(profile.stats.totalChaptersRead, TOTAL_CANON_CHAPTERS)}
                           </span>
                           <span className="text-xs text-[var(--text-secondary)] tabular-nums">
                             {profile.stats.totalChaptersRead.toLocaleString()} /{' '}
@@ -182,7 +180,7 @@ export const FriendFolioDialog: React.FC<FriendFolioDialogProps> = ({
                         <p className="text-xs text-[var(--text-secondary)]">Old Testament</p>
                         <div className="mt-0.5 flex flex-wrap items-baseline gap-2">
                           <span className="font-display text-xl font-medium tabular-nums text-[var(--text-primary)] sm:text-2xl">
-                            {formatPct(profile.stats.otChaptersRead, OT_TOTAL_CHAPTERS)}
+                            {formatPercent(profile.stats.otChaptersRead, OT_TOTAL_CHAPTERS)}
                           </span>
                           <span className="text-xs text-[var(--text-secondary)] tabular-nums">
                             {profile.stats.otChaptersRead} ch
@@ -194,7 +192,7 @@ export const FriendFolioDialog: React.FC<FriendFolioDialogProps> = ({
                         <p className="text-xs text-[var(--text-secondary)]">New Testament</p>
                         <div className="mt-0.5 flex flex-wrap items-baseline gap-2">
                           <span className="font-display text-xl font-medium tabular-nums text-[var(--text-primary)] sm:text-2xl">
-                            {formatPct(profile.stats.ntChaptersRead, NT_TOTAL_CHAPTERS)}
+                            {formatPercent(profile.stats.ntChaptersRead, NT_TOTAL_CHAPTERS)}
                           </span>
                           <span className="text-xs text-[var(--text-secondary)] tabular-nums">
                             {profile.stats.ntChaptersRead} ch
@@ -207,7 +205,7 @@ export const FriendFolioDialog: React.FC<FriendFolioDialogProps> = ({
                       <div className="mb-2 flex items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">
                         <span className="inline-flex items-center gap-1.5 font-medium text-[var(--text-primary)]">
                           <BookOpen className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
-                          <span>Canonical journey</span>
+                          <span>Bible progress</span>
                         </span>
                         <span className="tabular-nums">
                           {profile.stats.booksCompleted} of 66 books completed
@@ -226,7 +224,7 @@ export const FriendFolioDialog: React.FC<FriendFolioDialogProps> = ({
                     {privacy?.showStreak && (
                       <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3.5">
                         <div>
-                          <p className="text-xs text-[var(--text-secondary)]">Reading rhythm</p>
+                          <p className="text-xs text-[var(--text-secondary)]">Reading streak</p>
                           <p className="mt-0.5 font-display text-xl font-medium tabular-nums text-[var(--text-primary)]">
                             {profile.stats.currentStreak}{' '}
                             <span className="font-sans text-xs font-normal text-[var(--text-secondary)]">
@@ -248,10 +246,10 @@ export const FriendFolioDialog: React.FC<FriendFolioDialogProps> = ({
                           <div className="flex items-center justify-between gap-2 text-xs">
                             <span className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
                               <Award className="h-3.5 w-3.5 text-[var(--color-lamp)]" aria-hidden="true" />
-                              <span>Hall of Seals</span>
+                              <span>Milestones</span>
                             </span>
                             <span className="font-medium tabular-nums text-[var(--text-primary)]">
-                              {profile.stats.unlockedSealsCount} earned
+                              {profile.stats.unlockedSealsCount} unlocked
                             </span>
                           </div>
                         )}
@@ -262,7 +260,7 @@ export const FriendFolioDialog: React.FC<FriendFolioDialogProps> = ({
                               <span>Active plan</span>
                             </span>
                             <span className="text-right font-medium text-[var(--text-primary)]">
-                              {profile.stats.activePlanTitle || 'Free-form reading'}
+                              {profile.stats.activePlanTitle || 'Free reading'}
                             </span>
                           </div>
                         )}
@@ -282,10 +280,35 @@ export const FriendFolioDialog: React.FC<FriendFolioDialogProps> = ({
                   !privacy?.showActivePlan &&
                   !privacy?.showRecentBook && (
                     <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 text-sm text-[var(--text-secondary)]">
-                      {connection.displayName} has hidden individual reading metrics for their circle.
+                      {connection.displayName} has hidden their reading metrics from friends.
                     </div>
                   )}
               </>
+            )}
+
+            {onInviteToPlan && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--text-primary)]">
+                    Read a plan together
+                  </p>
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Invite {connection.displayName} to follow a Bible reading plan with you.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const uid = connection.friendUid;
+                    onClose();
+                    onInviteToPlan(uid);
+                  }}
+                  className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                >
+                  <Users className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>Start shared plan</span>
+                </button>
+              </div>
             )}
 
             <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">

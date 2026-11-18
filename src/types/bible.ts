@@ -126,6 +126,10 @@ export interface AchievementEvalContext {
   logs: ReadingLogEntry[];
   summary: BibleProgressSummary;
   booksById: Record<string, CanonBook>;
+  sortedLogsAsc?: ReadingLogEntry[];
+  latestLogDate?: string | null;
+  chapterThresholdDates?: ReadonlyMap<number, string>;
+  consecutiveSundays?: { best: number; fourthDate: string | null };
 }
 
 export interface AchievementStatus {
@@ -225,8 +229,6 @@ export interface FriendProfile {
   photoURL: string | null;
   username: string | null;
   discoverable: boolean;
-  /** Legacy field preserved optionally for reading older cloud profiles. */
-  friendCode?: string;
   sharingEnabled: boolean;
   privacy: FriendPrivacySettings;
   stats: FriendStatsSnapshot;

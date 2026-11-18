@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   BookOpen,
@@ -28,19 +28,33 @@ import {
   sanitizeShelfPlanIds,
   type PlanProgressState,
 } from '../../lib/plans';
-import { useBibleStore, type SaveCustomPlanInput } from '../../store/useBibleStore';
+import {
+  useFriendsStore,
+  useReadingData,
+  type SaveCustomPlanInput,
+} from '../../store/useBibleStore';
 import type { ReadingPlan, SharedPlanCohort } from '../../types/bible';
 import { ActivePlanFocusCard } from './ActivePlanFocusCard';
-import { CustomPlanBuilder, type CustomPlanDraft } from './CustomPlanBuilder';
-import { PlanFinderView } from './PlanFinderView';
+import type { CustomPlanDraft } from './CustomPlanBuilder';
 import { PlanJourneyMatrix } from './PlanJourneyMatrix';
 import { PlanSelectorStrip } from './PlanSelectorStrip';
 import { ReadTogetherBand } from './ReadTogetherBand';
-import { ReadTogetherModal } from './ReadTogetherModal';
+
+const CustomPlanBuilder = lazy(() =>
+  import('./CustomPlanBuilder').then((mod) => ({ default: mod.CustomPlanBuilder }))
+);
+const PlanFinderView = lazy(() =>
+  import('./PlanFinderView').then((mod) => ({ default: mod.PlanFinderView }))
+);
+const ReadTogetherModal = lazy(() =>
+  import('./ReadTogetherModal').then((mod) => ({ default: mod.ReadTogetherModal }))
+);
 
 interface PlansViewProps {
   onOpenBook?: (bookId: string) => void;
   onInspectJournalNotes?: (queryText: string) => void;
+  onOpenAccount?: () => void;
+  onOpenFriends?: () => void;
 }
 
 type ItineraryFilter = 'up-next' | 'stage' | 'completed';
@@ -49,6 +63,8 @@ type PlansScreenMode = 'workspace' | 'finder' | 'builder';
 export const PlansView: React.FC<PlansViewProps> = ({
   onOpenBook = () => {},
   onInspectJournalNotes,
+  onOpenAccount,
+  onOpenFriends,
 }) => {
   const {
     preferences,
@@ -60,11 +76,11 @@ export const PlansView: React.FC<PlansViewProps> = ({
     activateReadingPlan,
     removePlanFromShelf,
     restoreDefaultShelfPlans,
-    logChapters,
+    logChaptersBatch,
     saveCustomPlan,
     removeCustomPlan,
-    sharedPlans,
-  } = useBibleStore();
+  } = useReadingData();
+  const { sharedPlans } = useFriendsStore();
 
   const [readTogetherModal, setReadTogetherModal] = useState<{
     plan: ReadingPlan;
@@ -86,18 +102,23 @@ export const PlansView: React.FC<PlansViewProps> = ({
     [customReadingPlans, preferences.activePlanId]
   );
 
-  const progressByPlanId = useMemo(() => {
-    const map: Record<string, PlanProgressState> = {};
-    for (const plan of allPlans) {
-      map[plan.id] = computePlanProgress(plan, summary);
-    }
-    return map;
-  }, [allPlans, summary]);
-
   const shelfPlans = useMemo(
     () => getShelfPlans(allPlans, preferences.activePlanId, preferences.shelfPlanIds),
     [allPlans, preferences.activePlanId, preferences.shelfPlanIds]
   );
+
+  // Only compute progress for visible shelf + active plan in workspace mode;
+  // lazily compute the full catalog only when Plan Finder is opened.
+  const progressByPlanId = useMemo(() => {
+    const map: Record<string, PlanProgressState> = {};
+    const plansToCompute = mode === 'finder' ? allPlans : [...shelfPlans, activePlan];
+    for (const plan of plansToCompute) {
+      if (!map[plan.id]) {
+        map[plan.id] = computePlanProgress(plan, summary);
+      }
+    }
+    return map;
+  }, [activePlan, allPlans, mode, shelfPlans, summary]);
 
   const hasActiveShelfPlan =
     shelfPlans.length > 0 && preferences.activePlanId !== null;
@@ -165,17 +186,17 @@ export const PlansView: React.FC<PlansViewProps> = ({
     const dateToUse = options?.readDate || todayPlainDate();
     const trimmedNote = options?.note?.trim() || '';
     const unreadAssignments = getUnreadAssignmentsForDay(targetDay, summary);
+    if (unreadAssignments.length === 0) return;
 
-    for (let i = 0; i < unreadAssignments.length; i++) {
-      const assignment = unreadAssignments[i];
-      await logChapters({
+    await logChaptersBatch(
+      unreadAssignments.map((assignment, idx) => ({
         bookId: assignment.bookId,
         chapters: assignment.chapters,
         readDate: dateToUse,
-        note: i === 0 && trimmedNote ? trimmedNote : undefined,
+        note: idx === 0 && trimmedNote ? trimmedNote : undefined,
         planId: activePlan.id,
-      });
-    }
+      }))
+    );
   };
 
   const handleSelectStage = (stageIndex: number) => {
@@ -288,35 +309,51 @@ export const PlansView: React.FC<PlansViewProps> = ({
 
   if (mode === 'finder') {
     return (
-      <PlanFinderView
-        plans={allPlans}
-        activePlanId={hasActiveShelfPlan ? activePlan.id : null}
-        shelfPlanIds={preferences.shelfPlanIds}
-        progressByPlanId={progressByPlanId}
-        onSelectPlan={(planId) => {
-          setRecentlyRemoved(null);
-          void activateReadingPlan(planId);
-          setMode('workspace');
-        }}
-        onClose={() => setMode('workspace')}
-        onCreateCustomPlan={() => openNewBuilder('finder')}
-        onEditCustomPlan={(plan) => openEditBuilder(plan, 'finder')}
-        onCustomizeCopy={(plan) => openCopyBuilder(plan, 'finder')}
-        onDeleteCustomPlan={async (id) => {
-          setRecentlyRemoved(null);
-          await removeCustomPlan(id);
-        }}
-      />
+      <Suspense
+        fallback={
+          <div className="folio-sheet p-8 text-center text-sm text-[var(--text-secondary)]">
+            Loading plan catalog…
+          </div>
+        }
+      >
+        <PlanFinderView
+          plans={allPlans}
+          activePlanId={hasActiveShelfPlan ? activePlan.id : null}
+          shelfPlanIds={preferences.shelfPlanIds}
+          progressByPlanId={progressByPlanId}
+          onSelectPlan={(planId) => {
+            setRecentlyRemoved(null);
+            void activateReadingPlan(planId);
+            setMode('workspace');
+          }}
+          onClose={() => setMode('workspace')}
+          onCreateCustomPlan={() => openNewBuilder('finder')}
+          onEditCustomPlan={(plan) => openEditBuilder(plan, 'finder')}
+          onCustomizeCopy={(plan) => openCopyBuilder(plan, 'finder')}
+          onDeleteCustomPlan={async (id) => {
+            setRecentlyRemoved(null);
+            await removeCustomPlan(id);
+          }}
+        />
+      </Suspense>
     );
   }
 
   if (mode === 'builder') {
     return (
-      <CustomPlanBuilder
-        initialDraft={builderDraft}
-        onSave={handleSaveBuilderPlan}
-        onCancel={() => setMode(builderReturnMode)}
-      />
+      <Suspense
+        fallback={
+          <div className="folio-sheet p-8 text-center text-sm text-[var(--text-secondary)]">
+            Loading custom plan builder…
+          </div>
+        }
+      >
+        <CustomPlanBuilder
+          initialDraft={builderDraft}
+          onSave={handleSaveBuilderPlan}
+          onCancel={() => setMode(builderReturnMode)}
+        />
+      </Suspense>
     );
   }
 
@@ -407,7 +444,7 @@ export const PlansView: React.FC<PlansViewProps> = ({
               id="plan-itinerary-heading"
               className="font-display text-xl font-medium text-[var(--text-primary)] sm:text-2xl"
             >
-              Daily Itinerary
+              Daily Readings
             </h2>
             <p className="mt-0.5 text-xs text-[var(--text-secondary)] tabular-nums">
               {itineraryFilter === 'stage' && activeStage
@@ -567,30 +604,39 @@ export const PlansView: React.FC<PlansViewProps> = ({
 
                         {/* Interactive Assignment Pills */}
                         <div className="flex flex-wrap items-center gap-1.5">
-                          {dayStatus.assignmentStatuses.map((assignment) => (
-                            <button
-                              key={`${day.day}-${assignment.bookId}`}
-                              type="button"
-                              onClick={() => onOpenBook(assignment.bookId)}
-                              className={`tactile-press inline-flex min-h-7 items-center gap-1.5 rounded border px-2 py-0.5 text-xs transition-colors ${
-                                assignment.done
-                                  ? 'border-[var(--color-sage)]/40 bg-[var(--color-sage-soft)]/60 text-[var(--color-sage)]'
-                                  : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
-                              }`}
-                            >
-                              <span
-                                aria-hidden="true"
-                                className="h-1.5 w-1.5 rounded-full"
-                                style={{ backgroundColor: assignment.divisionColorVar }}
-                              />
-                              <span>{assignment.chapterRangeLabel}</span>
-                              {!assignment.done && assignment.readChaptersCount > 0 && (
-                                <span className="tabular-nums opacity-80">
-                                  ({assignment.readChaptersCount}/{assignment.totalChaptersCount})
+                          {dayStatus.assignmentStatuses.map((assignment) => {
+                            const repeatsTitle =
+                              dayStatus.assignmentStatuses.length === 1 &&
+                              assignment.chapterRangeLabel.trim() === day.title.trim();
+                            return (
+                              <button
+                                key={`${day.day}-${assignment.bookId}`}
+                                type="button"
+                                onClick={() => onOpenBook(assignment.bookId)}
+                                className={`tactile-press inline-flex min-h-7 items-center gap-1.5 rounded border px-2 py-0.5 text-xs transition-colors ${
+                                  assignment.done
+                                    ? 'border-[var(--color-sage)]/40 bg-[var(--color-sage-soft)]/60 text-[var(--color-sage)]'
+                                    : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
+                                }`}
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  className="h-1.5 w-1.5 rounded-full"
+                                  style={{ backgroundColor: assignment.divisionColorVar }}
+                                />
+                                <span>
+                                  {repeatsTitle
+                                    ? `Open ${assignment.bookName}`
+                                    : assignment.chapterRangeLabel}
                                 </span>
-                              )}
-                            </button>
-                          ))}
+                                {!assignment.done && assignment.readChaptersCount > 0 && (
+                                  <span className="tabular-nums opacity-80">
+                                    ({assignment.readChaptersCount}/{assignment.totalChaptersCount})
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
 
                           {dayNotes.length > 0 && (
                             <button
@@ -601,8 +647,7 @@ export const PlansView: React.FC<PlansViewProps> = ({
                             >
                               <ScrollText className="h-3 w-3" aria-hidden="true" />
                               <span>
-                                {dayNotes.length}{' '}
-                                {dayNotes.length === 1 ? 'reflection' : 'reflections'}
+                                {dayNotes.length} {dayNotes.length === 1 ? 'note' : 'notes'}
                               </span>
                             </button>
                           )}
@@ -694,12 +739,18 @@ export const PlansView: React.FC<PlansViewProps> = ({
         />
       )}
 
-      <ReadTogetherModal
-        open={Boolean(readTogetherModal)}
-        plan={readTogetherModal?.plan ?? null}
-        existingCohort={readTogetherModal?.existingCohort ?? null}
-        onClose={() => setReadTogetherModal(null)}
-      />
+      {readTogetherModal && (
+        <Suspense fallback={null}>
+          <ReadTogetherModal
+            open={true}
+            plan={readTogetherModal.plan}
+            existingCohort={readTogetherModal.existingCohort}
+            onClose={() => setReadTogetherModal(null)}
+            onOpenAccount={onOpenAccount}
+            onOpenFriends={onOpenFriends}
+          />
+        </Suspense>
+      )}
     </div>
   );
 };

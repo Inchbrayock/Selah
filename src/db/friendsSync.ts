@@ -15,10 +15,10 @@ import {
   writeBatch,
   type DocumentData,
   type Query,
-  type Timestamp,
 } from 'firebase/firestore';
 import type { AccountUser } from '../lib/auth';
 import { getFirebaseServices } from '../lib/firebase';
+import { timestampToIso } from './firestoreUtils';
 import {
   buildDirectorySearchPrefixes,
   buildFriendProfileStats,
@@ -38,6 +38,7 @@ import {
 import type {
   AchievementStatus,
   BibleProgressSummary,
+  BlockedFriendRecord,
   FriendPrivacySettings,
   FriendProfile,
   FriendRequestTarget,
@@ -47,21 +48,6 @@ import type {
   ReadingPlan,
   UserPreferences,
 } from '../types/bible';
-
-function timestampToIso(value: unknown): string {
-  if (value && typeof value === 'object' && 'toDate' in value) {
-    const fn = (value as Timestamp).toDate;
-    if (typeof fn === 'function') {
-      try {
-        return fn.call(value).toISOString();
-      } catch {
-        // Fallback below
-      }
-    }
-  }
-  if (typeof value === 'string' && value) return value;
-  return new Date().toISOString();
-}
 
 function docToStatsSnapshot(raw: unknown): FriendStatsSnapshot {
   const data = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -94,9 +80,6 @@ export function docToFriendProfile(docId: string, data: DocumentData): FriendPro
     photoURL: sanitizeHttpsPhotoUrl(data.photoURL),
     username,
     discoverable,
-    ...(typeof data.friendCode === 'string' && data.friendCode
-      ? { friendCode: data.friendCode }
-      : {}),
     sharingEnabled:
       typeof data.sharingEnabled === 'boolean' ? data.sharingEnabled : privacy.sharingEnabled,
     privacy,
@@ -242,10 +225,16 @@ async function allocateAvailableUsername(
     }
   }
 
-  for (const candidate of candidates) {
-    const snap = await getDoc(doc(db, 'usernames', candidate));
-    if (!snap.exists() || snap.data()?.uid === uid) {
-      return candidate;
+  for (let i = 0; i < candidates.length; i += 4) {
+    const batch = candidates.slice(i, i + 4);
+    const snaps = await Promise.all(
+      batch.map((candidate) => getDoc(doc(db, 'usernames', candidate)))
+    );
+    for (let j = 0; j < batch.length; j++) {
+      const snap = snaps[j];
+      if (!snap.exists() || snap.data()?.uid === uid) {
+        return batch[j];
+      }
     }
   }
 
@@ -526,11 +515,25 @@ export async function searchReaderDirectory(
 
   const dirCol = collection(services.db, 'readerDirectory');
   const firstToken = tokens[0] ?? cleanQuery;
+  // Choose the most selective (longest >= 2) token for array-contains so multi-word queries like "John Smith" don't truncate on common first names
+  const bestToken =
+    tokens.reduce((longest, tok) => (tok.length > longest.length ? tok : longest), '') ||
+    cleanQuery;
   const queriesToRun: Query<DocumentData>[] = [];
 
-  if (firstToken.length >= 2) {
+  if (bestToken.length >= 2) {
     queriesToRun.push(
-      query(dirCol, where('searchPrefixes', 'array-contains', firstToken), limit(20))
+      query(dirCol, where('searchPrefixes', 'array-contains', bestToken), limit(25))
+    );
+  }
+  if (!isHandleOnly && firstToken.length >= 1 && firstToken !== bestToken) {
+    queriesToRun.push(
+      query(
+        dirCol,
+        where('displayNameLower', '>=', cleanQuery),
+        where('displayNameLower', '<=', `${cleanQuery}\uf8ff`),
+        limit(15)
+      )
     );
   } else if (!isHandleOnly && firstToken.length === 1) {
     queriesToRun.push(
@@ -547,8 +550,8 @@ export async function searchReaderDirectory(
     queriesToRun.push(
       query(
         dirCol,
-        where('username', '>=', firstToken),
-        where('username', '<=', `${firstToken}\uf8ff`),
+        where('username', '>=', cleanQuery),
+        where('username', '<=', `${cleanQuery}\uf8ff`),
         limit(15)
       )
     );
@@ -606,18 +609,33 @@ export async function fetchSuggestedReaders(options: {
   return results.slice(0, maxResults);
 }
 
-export async function fetchBlockedUids(myUid: string): Promise<string[]> {
+export async function fetchBlockedUsers(myUid: string): Promise<BlockedFriendRecord[]> {
   const services = getFirebaseServices();
   if (!services || !myUid) return [];
 
   const snap = await getDocs(collection(services.db, 'users', myUid, 'blockedUsers'));
-  const uids: string[] = [];
+  const records: BlockedFriendRecord[] = [];
   snap.forEach((docSnap) => {
     const data = docSnap.data();
-    const uid = typeof data.blockedUid === 'string' && data.blockedUid ? data.blockedUid : docSnap.id;
-    if (uid) uids.push(uid);
+    const blockedUid =
+      typeof data.blockedUid === 'string' && data.blockedUid ? data.blockedUid : docSnap.id;
+    if (!blockedUid) return;
+    records.push({
+      blockedUid,
+      displayName:
+        typeof data.displayName === 'string' && data.displayName.trim()
+          ? data.displayName.trim()
+          : 'Blocked user',
+      createdAt: timestampToIso(data.createdAt),
+    });
   });
-  return uids;
+  records.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return records;
+}
+
+export async function fetchBlockedUids(myUid: string): Promise<string[]> {
+  const records = await fetchBlockedUsers(myUid);
+  return records.map((r) => r.blockedUid);
 }
 
 export async function sendFriendRequest(params: {
@@ -746,6 +764,12 @@ export async function blockUserAndRemoveFriendship(params: {
     batch.delete(doc(services.db, 'friendships', params.pairId));
   }
   await batch.commit();
+}
+
+export async function unblockUser(myUid: string, targetUid: string): Promise<void> {
+  const services = getFirebaseServices();
+  if (!services || !myUid || !targetUid) return;
+  await deleteDoc(doc(services.db, 'users', myUid, 'blockedUsers', targetUid));
 }
 
 export function subscribeFriendships(

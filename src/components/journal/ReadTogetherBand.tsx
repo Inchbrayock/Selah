@@ -4,7 +4,7 @@ import { BookOpen, Check, UserPlus, Users } from 'lucide-react';
 import { formatShortDate } from '../../lib/dates';
 import { getActiveLocalPlanIdForCohort } from '../../lib/fellowship';
 import { SPRING_PROGRESS, SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
-import { useBibleStore } from '../../store/useBibleStore';
+import { useAccountSync, useFriendsStore } from '../../store/useBibleStore';
 import type { SharedPlanCohort } from '../../types/bible';
 import { EncouragementSender } from '../friends/EncouragementSender';
 import { InlineDeleteConfirm } from '../ui/InlineDeleteConfirm';
@@ -14,6 +14,7 @@ interface ReadTogetherBandProps {
   activePlanId: string | null;
   onSelectLocalPlan: (localPlanId: string) => void;
   onInviteToCohort: (cohort: SharedPlanCohort) => void;
+  hideHeader?: boolean;
 }
 
 function formatLastRead(dateStr: string | null): string | null {
@@ -29,15 +30,16 @@ export const ReadTogetherBand: React.FC<ReadTogetherBandProps> = ({
   activePlanId,
   onSelectLocalPlan,
   onInviteToCohort,
+  hideHeader = false,
 }) => {
+  const { user } = useAccountSync();
   const {
-    user,
     friends,
     sharedPlans,
     joinSharedPlanCohort,
     leaveSharedPlanCohort,
     deleteSharedPlanCohort,
-  } = useBibleStore();
+  } = useFriendsStore();
   const [busyCohortId, setBusyCohortId] = useState<string | null>(null);
   const [confirmEndCohortId, setConfirmEndCohortId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -88,21 +90,23 @@ export const ReadTogetherBand: React.FC<ReadTogetherBandProps> = ({
   }
 
   return (
-    <section aria-labelledby="read-together-heading" className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Users className="h-4 w-4 text-[var(--color-accent)]" aria-hidden="true" />
-          <h3
-            id="read-together-heading"
-            className="font-display text-lg font-medium text-[var(--text-primary)]"
-          >
-            Read together
-          </h3>
+    <section aria-labelledby={hideHeader ? undefined : 'read-together-heading'} className="space-y-4">
+      {!hideHeader && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-[var(--color-accent)]" aria-hidden="true" />
+            <h3
+              id="read-together-heading"
+              className="font-display text-lg font-medium text-[var(--text-primary)]"
+            >
+              Read together
+            </h3>
+          </div>
+          <p className="text-xs text-[var(--text-secondary)]">
+            Plan days and chapter progress only — journal notes stay private
+          </p>
         </div>
-        <p className="text-xs text-[var(--text-secondary)]">
-          Plan days and chapter progress only — journal notes stay private
-        </p>
-      </div>
+      )}
 
       {actionError && (
         <div
@@ -126,7 +130,7 @@ export const ReadTogetherBand: React.FC<ReadTogetherBandProps> = ({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded bg-[var(--color-lamp-soft)] px-2 py-0.5 text-[0.7rem] font-medium text-[var(--text-primary)]">
-                      Shared plan invitation
+                      Shared plan invite
                     </span>
                     <span className="text-xs text-[var(--text-secondary)] tabular-nums">
                       {cohort.durationDays} {cohort.durationDays === 1 ? 'day' : 'days'}

@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { Check, Lock } from 'lucide-react';
 import { formatPlainDate } from '../../lib/dates';
 import { SPRING_TACTILE, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
-import { useBibleStore } from '../../store/useBibleStore';
+import { useReadingData } from '../../store/useBibleStore';
 import type { AchievementCategory, AchievementStatus, AchievementTier } from '../../types/bible';
 import { MedallionIcon } from './MedallionIcon';
 
@@ -12,13 +12,13 @@ interface AchievementsViewProps {
 }
 
 const CATEGORIES: { id: 'all' | AchievementCategory; label: string }[] = [
-  { id: 'all', label: 'All seals' },
-  { id: 'milestones', label: 'Milestones' },
-  { id: 'divisions', label: 'Books & divisions' },
-  { id: 'consistency', label: 'Consistency' },
+  { id: 'all', label: 'All milestones' },
+  { id: 'milestones', label: 'Progress' },
+  { id: 'divisions', label: 'Books & sections' },
+  { id: 'consistency', label: 'Streaks' },
   { id: 'habits', label: 'Habits' },
-  { id: 'special', label: 'Secret seals' },
-  { id: 'fellowship', label: 'Fellowship (Bonus)' },
+  { id: 'special', label: 'Secret' },
+  { id: 'fellowship', label: 'Friends (Bonus)' },
 ];
 
 const TIER_ORDER: AchievementTier[] = ['bronze', 'silver', 'gold', 'luminous'];
@@ -27,13 +27,13 @@ const TIER_NAMES: Record<AchievementTier, string> = {
   bronze: 'Bronze',
   silver: 'Silver',
   gold: 'Gold',
-  luminous: 'Luminous',
+  luminous: 'Master',
 };
 
 export const AchievementsView: React.FC<AchievementsViewProps> = ({
   onInspectAchievement,
 }) => {
-  const { achievements, fellowshipAchievements } = useBibleStore();
+  const { achievements, fellowshipAchievements } = useReadingData();
   const [category, setCategory] = useState<'all' | AchievementCategory>('all');
   const [onlyUnlocked, setOnlyUnlocked] = useState(false);
 
@@ -67,10 +67,10 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:gap-6">
           <div>
             <h1 className="font-display text-2xl font-medium tracking-tight text-[var(--text-primary)] sm:text-[2.15rem]">
-              Illuminated Hall of Seals
+              Milestones
             </h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)] tabular-nums">
-              {unlockedCount} of {achievements.length} seals earned. Select any medallion to inspect its Scripture echo and progress.
+              {unlockedCount} of {achievements.length} unlocked. Tap any milestone to see its verse and progress.
             </p>
           </div>
 
@@ -87,7 +87,7 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
         </div>
 
         <div className="mt-5 flex flex-col gap-3 sm:mt-6 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-          <div className="-mx-3.5 flex flex-nowrap gap-1.5 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
+          <div className="no-scrollbar -mx-3.5 flex flex-nowrap gap-1.5 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
             {CATEGORIES.map((cat) => {
               const isActive = category === cat.id;
               return (
@@ -124,26 +124,26 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
               onChange={(e) => setOnlyUnlocked(e.target.checked)}
               className="h-4 w-4 rounded"
             />
-            <span>Earned only</span>
+            <span>Unlocked only</span>
           </label>
         </div>
       </section>
 
       {category === 'fellowship' && (
         <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--color-sage-soft)] px-4 py-3 text-xs leading-relaxed text-[var(--text-primary)]">
-          Optional bonus seals celebrating shared reading and encouragement. They are kept separate
-          from the {achievements.length} core solo seals so offline and solo readers can always earn{' '}
-          {achievements.length}/{achievements.length}.
+          Optional bonus milestones celebrating shared reading and encouragement with friends. They
+          are kept separate from the {achievements.length} solo milestones so offline and solo
+          readers can always reach {achievements.length}/{achievements.length}.
         </div>
       )}
 
       {filtered.length === 0 ? (
         <div className="folio-sheet p-10 text-center">
           <p className="font-display text-xl font-medium text-[var(--text-primary)]">
-            No seals match this filter yet
+            No milestones match this filter yet
           </p>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Uncheck “Earned only” or continue logging chapters to unlock your first seal.
+            Uncheck “Unlocked only” or keep logging chapters to unlock your first milestone.
           </p>
         </div>
       ) : (
@@ -188,7 +188,7 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
                   </div>
 
                   <h2 className="mt-1 font-display text-lg font-medium leading-snug text-[var(--text-primary)]">
-                    {isHidden ? 'Hidden Sanctuary Seal' : item.definition.title}
+                    {isHidden ? 'Hidden Milestone' : item.definition.title}
                   </h2>
                   <p className="mt-0.5 text-xs leading-relaxed text-[var(--text-secondary)]">
                     {isHidden
@@ -199,7 +199,7 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
                   {!isHidden && (
                     <div className="mt-3">
                       <div className="flex items-center justify-between text-xs tabular-nums text-[var(--text-secondary)]">
-                        <span>{item.unlocked ? 'Earned' : 'Progress'}</span>
+                        <span>{item.unlocked ? 'Unlocked' : 'Progress'}</span>
                         <span>
                           {item.current.toLocaleString()} / {item.target.toLocaleString()}
                         </span>

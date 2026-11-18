@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Check, Compass, Plus, RotateCcw, Search, Trash2 } from 'lucide-react';
+import { Check, Compass, Plus, RotateCcw, Search, Trash2, X } from 'lucide-react';
 import { SPRING_PROGRESS, SPRING_TACTILE, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
 import type { PlanProgressState } from '../../lib/plans';
 import type { ReadingPlan } from '../../types/bible';
@@ -50,12 +50,12 @@ export const PlanSelectorStrip: React.FC<PlanSelectorStripProps> = ({
       <div className="flex flex-col justify-between gap-2.5 sm:flex-row sm:items-center">
         <div>
           <p className="text-sm font-medium text-[var(--text-primary)]">
-            Your plans shelf
+            Your plans
           </p>
           <p className="text-xs text-[var(--text-secondary)]">
             {plans.length === 0
-              ? 'Your shelf is empty. Pick a curated path or build a custom reading plan.'
-              : `Switch between plans on your shelf, remove plans anytime, or explore all ${totalCatalogCount} in Plan Finder.`}
+              ? 'No saved plans yet. Pick a plan or build your own custom schedule.'
+              : `Switch between your plans, remove them anytime, or browse all ${totalCatalogCount} in Plan Finder.`}
           </p>
         </div>
 
@@ -209,12 +209,16 @@ export const PlanSelectorStrip: React.FC<PlanSelectorStripProps> = ({
                     whileTap={TACTILE_PILL_TAP}
                     transition={SPRING_TACTILE}
                     onClick={() => setConfirmDeleteId(plan.id)}
-                    aria-label={plan.isCustom ? 'Delete custom plan from shelf' : 'Delete plan from shelf'}
+                    aria-label={plan.isCustom ? 'Delete custom plan' : 'Remove plan from your plans'}
                     aria-describedby={titleId}
-                    title={plan.isCustom ? 'Delete custom plan' : 'Delete from shelf'}
-                    className="tactile-press absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-secondary)] transition-colors hover:border-[var(--color-crimson)] hover:text-[var(--color-crimson)] focus-visible:border-[var(--color-crimson)] focus-visible:text-[var(--color-crimson)]"
+                    title={plan.isCustom ? 'Delete custom plan' : 'Remove plan'}
+                    className="tactile-press absolute right-1.5 top-1.5 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-secondary)] opacity-70 transition-colors hover:bg-[var(--bg-canvas)] hover:text-[var(--color-crimson)] hover:opacity-100 focus-visible:bg-[var(--bg-canvas)] focus-visible:text-[var(--color-crimson)] focus-visible:opacity-100 sm:h-7 sm:w-7"
                   >
-                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    {plan.isCustom ? (
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    ) : (
+                      <X className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
                   </motion.button>
                 )}
 

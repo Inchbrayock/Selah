@@ -11,29 +11,24 @@ import type {
 export interface EncouragementPresetOption {
   id: EncouragementPresetId;
   label: string;
-  shortLabel: string;
 }
 
 export const ENCOURAGEMENT_PRESETS: readonly EncouragementPresetOption[] = [
   {
     id: 'praying',
     label: 'Praying for your reading today',
-    shortLabel: 'Praying today',
   },
   {
     id: 'alongside',
     label: 'Reading along with you',
-    shortLabel: 'Reading along',
   },
   {
     id: 'keep-going',
-    label: 'Glad to see your lamp lit today',
-    shortLabel: 'Lamp lit',
+    label: 'Great job keeping your streak going!',
   },
   {
     id: 'grace-peace',
     label: 'Grace and peace as you read',
-    shortLabel: 'Grace & peace',
   },
 ] as const;
 

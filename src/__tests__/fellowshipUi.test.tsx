@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountUser } from '../lib/auth';
 import type {
+  BlockedFriendRecord,
   CustomPlanDefinition,
   FriendProfile,
   FriendshipRecord,
@@ -48,6 +49,8 @@ const friendsMocks = vi.hoisted(() => ({
   searchReaderDirectory: vi.fn().mockResolvedValue([]),
   fetchSuggestedReaders: vi.fn().mockResolvedValue([]),
   fetchBlockedUids: vi.fn().mockResolvedValue([]),
+  fetchBlockedUsers: vi.fn().mockResolvedValue([] as BlockedFriendRecord[]),
+  unblockUser: vi.fn().mockResolvedValue(undefined),
   sendFriendRequest: vi.fn(),
   acceptFriendRequest: vi.fn().mockResolvedValue(undefined),
   deleteFriendship: vi.fn().mockResolvedValue(undefined),
@@ -122,6 +125,8 @@ vi.mock('../db/friendsSync', () => ({
   searchReaderDirectory: (...args: unknown[]) => friendsMocks.searchReaderDirectory(...args),
   fetchSuggestedReaders: (...args: unknown[]) => friendsMocks.fetchSuggestedReaders(...args),
   fetchBlockedUids: (...args: unknown[]) => friendsMocks.fetchBlockedUids(...args),
+  fetchBlockedUsers: (...args: unknown[]) => friendsMocks.fetchBlockedUsers(...args),
+  unblockUser: (...args: unknown[]) => friendsMocks.unblockUser(...args),
   sendFriendRequest: (...args: unknown[]) => friendsMocks.sendFriendRequest(...args),
   acceptFriendRequest: (...args: unknown[]) => friendsMocks.acceptFriendRequest(...args),
   deleteFriendship: (...args: unknown[]) => friendsMocks.deleteFriendship(...args),
@@ -288,7 +293,7 @@ function emitAuth(user: AccountUser | null) {
   }
 }
 
-describe('Phase 2 Shared Reading, Quiet Encouragements, and Fellowship Seals', () => {
+describe('Shared Reading, Encouragements, and Friend Bonus Milestones', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
@@ -312,21 +317,22 @@ describe('Phase 2 Shared Reading, Quiet Encouragements, and Fellowship Seals', (
     cloudMocks.fetchCloudCustomPlans.mockResolvedValue([] as CustomPlanDefinition[]);
     cloudMocks.subscribeCloudSanctuary.mockImplementation(() => () => {});
     friendsMocks.ensureOwnFriendProfile.mockResolvedValue(HANNAH_PROFILE);
+    friendsMocks.fetchBlockedUsers.mockResolvedValue([]);
   });
 
-  it('keeps the Hall of Seals 28 core solo seals separate while offering Optional Fellowship (Bonus) seals', async () => {
+  it('keeps the 28 solo milestones separate while offering Optional Friends (Bonus) milestones', async () => {
     render(<App />);
 
     const nav = await screen.findByRole('navigation', { name: 'Primary' });
-    fireEvent.click(within(nav).getByRole('button', { name: /Hall of Seals/i }));
+    fireEvent.click(within(nav).getByRole('button', { name: /^Milestones$/i }));
 
-    expect(await screen.findByText(/0 of 28 seals earned/i)).toBeInTheDocument();
+    expect(await screen.findByText(/0 of 28 unlocked/i)).toBeInTheDocument();
 
-    const bonusPill = screen.getByRole('button', { name: 'Fellowship (Bonus)' });
+    const bonusPill = screen.getByRole('button', { name: 'Friends (Bonus)' });
     fireEvent.click(bonusPill);
 
     expect(
-      await screen.findByText(/Optional bonus seals celebrating shared reading/i)
+      await screen.findByText(/Optional bonus milestones celebrating shared reading/i)
     ).toBeInTheDocument();
     expect(screen.getByText('Iron Sharpens Iron')).toBeInTheDocument();
     expect(screen.getByText('Two Are Better Than One')).toBeInTheDocument();
@@ -334,10 +340,25 @@ describe('Phase 2 Shared Reading, Quiet Encouragements, and Fellowship Seals', (
     expect(screen.getByText('A Threefold Cord')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Iron Sharpens Iron/i }));
-    expect(await screen.findByText('Optional Fellowship Seal')).toBeInTheDocument();
+    expect(await screen.findByText('Optional Friend Milestone')).toBeInTheDocument();
   }, 15000);
 
-  it('supports starting a Read Together cohort, joining a custom shared plan invite, and displaying member progress without notes', async () => {
+  it('offers a working Sign in button in ReadTogetherModal when signed out', async () => {
+    render(<App />);
+
+    const nav = await screen.findByRole('navigation', { name: 'Primary' });
+    fireEvent.click(within(nav).getByRole('button', { name: /Journal & Plans/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reading Plans' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: /Read together/i }));
+    const dialog = await screen.findByRole('dialog');
+    const signInBtn = within(dialog).getByRole('button', { name: /^Sign in$/i });
+    fireEvent.click(signInBtn);
+
+    expect(await screen.findByTestId('account-popover')).toBeInTheDocument();
+  }, 15000);
+
+  it('supports starting a Read Together cohort, joining a custom shared plan invite, and displaying member progress in Plans and Friends', async () => {
     const createdCohort: SharedPlanCohort = {
       id: 'cohort-gospel-share',
       hostUid: 'uid_hannah',
@@ -456,6 +477,9 @@ describe('Phase 2 Shared Reading, Quiet Encouragements, and Fellowship Seals', (
       ]);
     });
 
+    // Profile attention badge highlights the pending shared plan invite
+    expect(await screen.findByTestId('profile-attention-badge')).toHaveTextContent('1');
+
     expect(await screen.findByText('Thirty Days in Psalms')).toBeInTheDocument();
     expect(screen.getByText(/Invited by Miriam/i)).toBeInTheDocument();
 
@@ -468,7 +492,7 @@ describe('Phase 2 Shared Reading, Quiet Encouragements, and Fellowship Seals', (
     expect(screen.getByText('12/30 ch')).toBeInTheDocument();
   }, 15000);
 
-  it('displays and acknowledges received quiet notes and enforces the 12-hour send cooldown', async () => {
+  it('displays and marks encouragements read inside Friends and enforces the 12-hour send cooldown', async () => {
     const sentIso = new Date().toISOString();
     fellowshipMocks.sendQuietEncouragement.mockResolvedValue({ sentAt: sentIso });
 
@@ -500,13 +524,15 @@ describe('Phase 2 Shared Reading, Quiet Encouragements, and Fellowship Seals', (
       ]);
     });
 
-    const openCircleBtns = await screen.findAllByRole('button', { name: 'Open Reading Circle' });
-    fireEvent.click(openCircleBtns[0]);
+    // Profile attention badge reflects unread encouragement
+    expect(await screen.findByTestId('profile-attention-badge')).toHaveTextContent('1');
 
-    expect(await screen.findByRole('heading', { name: 'Quiet notes' })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Friends' }));
+
+    expect(await screen.findByRole('heading', { name: 'Encouragements' })).toBeInTheDocument();
     expect(screen.getByText('“Praying for your reading today”')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mark read' }));
     await waitFor(() => {
       expect(fellowshipMocks.acknowledgeQuietEncouragement).toHaveBeenCalledWith({
         recipientUid: 'uid_hannah',
@@ -514,7 +540,7 @@ describe('Phase 2 Shared Reading, Quiet Encouragements, and Fellowship Seals', (
       });
     });
 
-    // Open Miriam's Friend Folio and send a preset quiet encouragement
+    // Open Miriam's friend dialog and send an encouragement
     fireEvent.click(screen.getByRole('button', { name: /Miriam/i }));
     const presetButton = await screen.findByRole('button', { name: /Reading along with you/i });
     fireEvent.click(presetButton);
@@ -530,7 +556,7 @@ describe('Phase 2 Shared Reading, Quiet Encouragements, and Fellowship Seals', (
 
     // 12-hour cooldown immediately disables repeat sending
     expect(
-      await screen.findByText(/One note every 12 hours keeps Selah peaceful/i)
+      await screen.findByText(/You can send one every 12 hours/i)
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Grace and peace as you read/i })).toBeDisabled();
   }, 15000);

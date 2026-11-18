@@ -14,16 +14,23 @@ import {
   RefreshCw,
   Settings,
   UserCheck,
+  Users,
   X,
 } from 'lucide-react';
 import { SPRING_TACTILE, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
 import { formatUsernameHandle } from '../../lib/friends';
-import { useBibleStore } from '../../store/useBibleStore';
+import {
+  useAccountSync,
+  useFriendsStore,
+  useReadingData,
+} from '../../store/useBibleStore';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
+import { GuestMergeCard } from './GuestMergeCard';
 
 interface AccountDialogProps {
   open: boolean;
   onClose: () => void;
+  onOpenFriends?: () => void;
   onOpenSettings?: () => void;
   onEditPhoto?: () => void;
   anchorRef?: React.RefObject<HTMLElement | null>;
@@ -94,21 +101,20 @@ const GoogleMark: React.FC = () => (
 export const AccountDialog: React.FC<AccountDialogProps> = ({
   open,
   onClose,
+  onOpenFriends,
   onOpenSettings,
   onEditPhoto,
   anchorRef,
 }) => {
+  const { logs, summary, achievements } = useReadingData();
   const {
     firebaseAvailable,
     user,
-    logs,
-    summary,
-    achievements,
     syncStatus,
     syncError,
     lastSyncedAt,
     pendingMerge,
-    ownFriendProfile,
+    ensureAuthReady,
     signInWithGoogle,
     signInWithEmail,
     signUpWithEmail,
@@ -117,7 +123,14 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
     signOut,
     resolveGuestMerge,
     syncNow,
-  } = useBibleStore();
+  } = useAccountSync();
+  const {
+    ownFriendProfile,
+    friends,
+    incomingRequests,
+    unreadEncouragementsCount,
+    sharedPlans,
+  } = useFriendsStore();
 
   const [mode, setMode] = useState<AuthMode>('signin');
   const [email, setEmail] = useState('');
@@ -193,8 +206,11 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
       setErrorMsg(null);
       setStatusMsg(null);
       setEditingName(false);
+      if (firebaseAvailable && !user) {
+        void ensureAuthReady();
+      }
     }
-  }, [open]);
+  }, [ensureAuthReady, firebaseAvailable, open, user]);
 
   useEffect(() => {
     if (open && !editingName) {
@@ -203,6 +219,39 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
   }, [open, editingName, user?.displayName]);
 
   const unlockedCount = achievements.filter((a) => a.unlocked).length;
+  const pendingInvitesCount = sharedPlans.filter(
+    (sp) => sp.myMembership?.status === 'invited'
+  ).length;
+  const friendsAttentionCount = user
+    ? incomingRequests.length + unreadEncouragementsCount + pendingInvitesCount
+    : 0;
+
+  const friendsRowSubtitle = (() => {
+    if (!user) return 'Sign in to connect & read plans together';
+    if (friendsAttentionCount > 0) {
+      const parts: string[] = [];
+      if (incomingRequests.length > 0) {
+        parts.push(
+          `${incomingRequests.length} ${incomingRequests.length === 1 ? 'request' : 'requests'}`
+        );
+      }
+      if (unreadEncouragementsCount > 0) {
+        parts.push(
+          `${unreadEncouragementsCount} ${unreadEncouragementsCount === 1 ? 'note' : 'notes'}`
+        );
+      }
+      if (pendingInvitesCount > 0) {
+        parts.push(
+          `${pendingInvitesCount} plan ${pendingInvitesCount === 1 ? 'invite' : 'invites'}`
+        );
+      }
+      return parts.join(' · ');
+    }
+    if (friends.length > 0) {
+      return `${friends.length} ${friends.length === 1 ? 'friend' : 'friends'} · Progress & shared plans`;
+    }
+    return 'Find friends & read plans together';
+  })();
 
   const runProviderSignIn = async (
     signInFn: () => Promise<void>,
@@ -284,19 +333,19 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
       case 'synced':
         return {
           icon: Cloud,
-          label: 'Synced to cloud',
+          label: 'Synced',
           tone: 'text-[var(--color-sage)] bg-[var(--color-sage-soft)]',
         };
       case 'syncing':
         return {
           icon: RefreshCw,
-          label: 'Syncing ledger…',
+          label: 'Syncing…',
           tone: 'text-[var(--color-accent)] bg-[var(--color-accent-soft)]',
         };
       case 'offline':
         return {
           icon: CloudOff,
-          label: 'Offline — saved locally',
+          label: 'Offline — saved on device',
           tone: 'text-[var(--color-lamp)] bg-[var(--color-lamp-soft)]',
         };
       case 'error':
@@ -308,7 +357,7 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
       default:
         return {
           icon: Cloud,
-          label: 'Local only',
+          label: 'Saved on device',
           tone: 'text-[var(--text-secondary)] bg-[var(--bg-surface)]',
         };
     }
@@ -343,11 +392,11 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
                 id="account-dialog-title"
                 className="font-display text-xl font-medium text-[var(--text-primary)]"
               >
-                {user ? 'Your Sanctuary Account' : 'Save Your Reading Ledger'}
+                {user ? 'Account' : 'Sign in & sync'}
               </h2>
               <p className="text-xs text-[var(--text-secondary)]">
                 {user
-                  ? 'Readings, study notes, plans, and seals stay synced to your account.'
+                  ? 'Your reading history, notes, and plans sync automatically.'
                   : 'Sign in or create an account to back up and sync across devices.'}
               </p>
             </div>
@@ -355,7 +404,7 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
               type="button"
               whileTap={TACTILE_PILL_TAP}
               onClick={onClose}
-              aria-label="Close account dialog"
+              aria-label="Close account menu"
               className="inline-flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             >
               <X className="h-4 w-4" aria-hidden="true" />
@@ -491,32 +540,12 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
 
               {/* Pending Guest Merge */}
               {pendingMerge && (
-                <div className="rounded-md border border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-4 text-xs">
-                  <p className="font-medium text-[var(--text-primary)]">
-                    Unmerged local readings on this device
-                  </p>
-                  <p className="mt-1 leading-relaxed text-[var(--text-secondary)]">
-                    Found {pendingMerge.guestLogs.length} local reading{' '}
-                    {pendingMerge.guestLogs.length === 1 ? 'session' : 'sessions'} created before
-                    sign-in alongside {pendingMerge.cloudLogsCount} saved in your cloud account.
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void resolveGuestMerge('merge')}
-                      className="btn-primary rounded-md px-3 py-1.5 font-medium"
-                    >
-                      Merge local into account
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void resolveGuestMerge('cloud-only')}
-                      className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 font-medium text-[var(--text-primary)]"
-                    >
-                      Keep cloud only
-                    </button>
-                  </div>
-                </div>
+                <GuestMergeCard
+                  pendingMerge={pendingMerge}
+                  busy={syncStatus === 'syncing'}
+                  variant="compact"
+                  onResolve={(strategy) => void resolveGuestMerge(strategy)}
+                />
               )}
 
               {/* Sync Summary */}
@@ -535,7 +564,7 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
                     </p>
                   </div>
                   <div className="px-2">
-                    <p className="text-xs text-[var(--text-secondary)]">Seals</p>
+                    <p className="text-xs text-[var(--text-secondary)]">Milestones</p>
                     <p className="mt-0.5 font-display text-lg font-medium tabular-nums text-[var(--text-primary)]">
                       {unlockedCount}
                     </p>
@@ -767,7 +796,7 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
                       : mode === 'signin'
                         ? 'Sign in with email'
                         : mode === 'signup'
-                          ? 'Create Sanctuary account'
+                          ? 'Create account'
                           : 'Send reset link'}
                   </span>
                 </motion.button>
@@ -789,34 +818,70 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
             </>
           )}
 
-          {onOpenSettings && (
-            <div className="border-t border-[var(--border-subtle)] pt-3">
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onOpenSettings();
-                }}
-                className="group flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3.5 py-2.5 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)]"
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[var(--bg-surface)] text-[var(--text-secondary)] transition-colors group-hover:text-[var(--color-accent)]">
-                    <Settings className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-[var(--text-primary)]">
-                      Settings
+          {(onOpenFriends || onOpenSettings) && (
+            <div className="space-y-2 border-t border-[var(--border-subtle)] pt-3">
+              {onOpenFriends && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenFriends();
+                  }}
+                  className="group flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3.5 py-2.5 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)]"
+                >
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[var(--bg-surface)] text-[var(--text-secondary)] transition-colors group-hover:text-[var(--color-accent)]">
+                      <Users className="h-4 w-4" aria-hidden="true" />
                     </span>
-                    <span className="block truncate text-xs text-[var(--text-secondary)]">
-                      Username, privacy, theme, cadence &amp; updates
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2 text-sm font-medium text-[var(--text-primary)]">
+                        <span>Friends</span>
+                        {friendsAttentionCount > 0 && (
+                          <span className="rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[0.65rem] font-semibold leading-none text-white tabular-nums">
+                            {friendsAttentionCount}
+                          </span>
+                        )}
+                      </span>
+                      <span className="block truncate text-xs text-[var(--text-secondary)]">
+                        {friendsRowSubtitle}
+                      </span>
                     </span>
                   </span>
-                </span>
-                <ChevronRight
-                  className="h-4 w-4 shrink-0 text-[var(--text-tertiary)] transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--text-primary)]"
-                  aria-hidden="true"
-                />
-              </button>
+                  <ChevronRight
+                    className="h-4 w-4 shrink-0 text-[var(--text-secondary)] transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--text-primary)]"
+                    aria-hidden="true"
+                  />
+                </button>
+              )}
+
+              {onOpenSettings && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenSettings();
+                  }}
+                  className="group flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3.5 py-2.5 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)]"
+                >
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[var(--bg-surface)] text-[var(--text-secondary)] transition-colors group-hover:text-[var(--color-accent)]">
+                      <Settings className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-[var(--text-primary)]">
+                        Settings
+                      </span>
+                      <span className="block truncate text-xs text-[var(--text-secondary)]">
+                        Theme, streak rules, privacy &amp; backup
+                      </span>
+                    </span>
+                  </span>
+                  <ChevronRight
+                    className="h-4 w-4 shrink-0 text-[var(--text-secondary)] transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--text-primary)]"
+                    aria-hidden="true"
+                  />
+                </button>
+              )}
             </div>
           )}
 
