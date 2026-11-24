@@ -18,9 +18,12 @@ import {
   formatCooldownRemaining,
   getActiveLocalPlanIdForCohort,
   getEncouragementCooldownRemainingMs,
+  getEncouragementDisplayText,
   getEncouragementPresetLabel,
   isValidEncouragementPresetId,
+  MAX_CUSTOM_ENCOURAGEMENT_LENGTH,
   materializeSharedCohortPlan,
+  sanitizeCustomEncouragementMessage,
   sanitizeFellowshipStats,
 } from '../lib/fellowship';
 import { computeBibleProgress } from '../lib/progress';
@@ -85,15 +88,29 @@ describe('Phase 2 optional Fellowship Seals & core solo invariant', () => {
   });
 });
 
-describe('Quiet Encouragement presets & 12-hour cooldown math', () => {
-  it('validates allowed preset IDs and maps readable preset text', () => {
+describe('Quiet Encouragement presets, custom messages & 12-hour cooldown math', () => {
+  it('validates allowed preset IDs (including custom) and maps readable text', () => {
     expect(ENCOURAGEMENT_PRESETS).toHaveLength(4);
     for (const preset of ENCOURAGEMENT_PRESETS) {
       expect(isValidEncouragementPresetId(preset.id)).toBe(true);
       expect(getEncouragementPresetLabel(preset.id)).toBe(preset.label);
+      expect(getEncouragementDisplayText({ presetId: preset.id })).toBe(preset.label);
     }
+    expect(isValidEncouragementPresetId('custom')).toBe(true);
     expect(isValidEncouragementPresetId('free-text-hack')).toBe(false);
     expect(isValidEncouragementPresetId('')).toBe(false);
+
+    expect(sanitizeCustomEncouragementMessage('   ')).toBeNull();
+    expect(sanitizeCustomEncouragementMessage('  Romans 8:28!  ')).toBe('Romans 8:28!');
+    expect(
+      sanitizeCustomEncouragementMessage('a'.repeat(MAX_CUSTOM_ENCOURAGEMENT_LENGTH + 50))
+    ).toHaveLength(MAX_CUSTOM_ENCOURAGEMENT_LENGTH);
+    expect(
+      getEncouragementDisplayText({
+        presetId: 'custom',
+        customMessage: '  Thinking of you in Psalms today!  ',
+      })
+    ).toBe('Thinking of you in Psalms today!');
   });
 
   it('computes 12-hour cooldown remaining milliseconds and human labels accurately', () => {

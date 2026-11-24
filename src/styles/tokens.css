@@ -598,12 +598,14 @@
 }
 
 .halo-spin-anim {
+  transform-origin: center;
   @media (prefers-reduced-motion: no-preference) {
     animation: halo-spin 26s linear infinite;
   }
 }
 
 .halo-spin-reverse-anim {
+  transform-origin: center;
   @media (prefers-reduced-motion: no-preference) {
     animation: halo-spin-reverse 38s linear infinite;
   }

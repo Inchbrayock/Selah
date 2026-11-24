@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { motion } from 'motion/react';
-import { Check, Feather } from 'lucide-react';
+import { Check, Feather, Send } from 'lucide-react';
 import {
   ENCOURAGEMENT_PRESETS,
   formatCooldownRemaining,
   getEncouragementCooldownRemainingMs,
+  MAX_CUSTOM_ENCOURAGEMENT_LENGTH,
+  sanitizeCustomEncouragementMessage,
 } from '../../lib/fellowship';
 import { SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
 import { useFriendsStore } from '../../store/useBibleStore';
@@ -28,28 +30,40 @@ export const EncouragementSender: React.FC<EncouragementSenderProps> = ({
     sendQuietEncouragement,
     refreshEncouragementCooldown,
   } = useFriendsStore();
+  const customInputId = useId();
   const [expanded, setExpanded] = useState(!compact);
   const [sendingId, setSendingId] = useState<EncouragementPresetId | null>(null);
   const [justSentId, setJustSentId] = useState<EncouragementPresetId | null>(null);
+  const [customText, setCustomText] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setError(null);
     setJustSentId(null);
+    setCustomText('');
     void refreshEncouragementCooldown(recipientUid);
   }, [recipientUid, refreshEncouragementCooldown]);
 
   const lastSentIso = sentEncouragementCooldowns[recipientUid] ?? null;
   const remainingMs = getEncouragementCooldownRemainingMs(lastSentIso);
   const onCooldown = remainingMs > 0;
+  const sanitizedCustom = sanitizeCustomEncouragementMessage(customText);
 
-  async function handleSend(presetId: EncouragementPresetId) {
+  async function handleSend(presetId: EncouragementPresetId, customMessage?: string | null) {
     if (sendingId || onCooldown) return;
     setError(null);
     setSendingId(presetId);
     try {
-      await sendQuietEncouragement({ recipientUid, presetId, cohortTitle });
+      await sendQuietEncouragement({
+        recipientUid,
+        presetId,
+        customMessage: presetId === 'custom' ? customMessage ?? null : null,
+        cohortTitle,
+      });
       setJustSentId(presetId);
+      if (presetId === 'custom') {
+        setCustomText('');
+      }
       if (compact) {
         setExpanded(false);
       }
@@ -58,6 +72,15 @@ export const EncouragementSender: React.FC<EncouragementSenderProps> = ({
     } finally {
       setSendingId(null);
     }
+  }
+
+  async function handleCustomSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!sanitizedCustom) {
+      setError('Write a short message of encouragement before sending.');
+      return;
+    }
+    await handleSend('custom', sanitizedCustom);
   }
 
   if (compact && !expanded) {
@@ -93,7 +116,7 @@ export const EncouragementSender: React.FC<EncouragementSenderProps> = ({
   }
 
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]">
           <Feather className="h-3.5 w-3.5 text-[var(--color-accent)]" aria-hidden="true" />
@@ -146,6 +169,64 @@ export const EncouragementSender: React.FC<EncouragementSenderProps> = ({
           );
         })}
       </div>
+
+      <form
+        onSubmit={(e) => void handleCustomSubmit(e)}
+        className="space-y-2 border-t border-[var(--border-subtle)] pt-3"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <label
+            htmlFor={customInputId}
+            className="text-xs font-medium text-[var(--text-secondary)]"
+          >
+            Or write a personal note
+          </label>
+          <span className="text-[0.7rem] text-[var(--text-secondary)] tabular-nums">
+            {customText.length}/{MAX_CUSTOM_ENCOURAGEMENT_LENGTH}
+          </span>
+        </div>
+        <textarea
+          id={customInputId}
+          rows={2}
+          maxLength={MAX_CUSTOM_ENCOURAGEMENT_LENGTH}
+          value={customText}
+          disabled={onCooldown || sendingId !== null}
+          onChange={(e) => {
+            setCustomText(e.target.value);
+            if (error) setError(null);
+          }}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && sanitizedCustom && !onCooldown && sendingId === null) {
+              e.preventDefault();
+              void handleSend('custom', sanitizedCustom);
+            }
+          }}
+          placeholder={`Write an encouragement or verse for ${recipientName}…`}
+          className="folio-input w-full resize-none px-3 py-2 text-base leading-relaxed placeholder:text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-55 sm:text-sm"
+        />
+        <div className="flex items-center justify-end">
+          <motion.button
+            type="submit"
+            whileTap={TACTILE_TAP}
+            transition={SPRING_TACTILE}
+            disabled={onCooldown || sendingId !== null || !sanitizedCustom}
+            className="btn-primary inline-flex min-h-9 items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs font-medium transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-55"
+          >
+            {justSentId === 'custom' ? (
+              <Check className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <Send className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            <span>
+              {sendingId === 'custom'
+                ? 'Sending…'
+                : justSentId === 'custom'
+                  ? 'Sent'
+                  : 'Send note'}
+            </span>
+          </motion.button>
+        </div>
+      </form>
 
       {onCooldown && (
         <p className="text-xs leading-relaxed text-[var(--text-secondary)]">

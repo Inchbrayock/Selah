@@ -229,7 +229,8 @@ rules_version = '2';
 //       - recipientUid: string (required, immutable, == {recipientUid})
 //       - senderName: string (required, 0..100 chars)
 //       - senderPhotoURL: string | null (required key, null or https:// URL 1..1000 chars)
-//       - presetId: string (required, one of: 'praying', 'alongside', 'keep-going', 'grace-peace')
+//       - presetId: string (required, one of: 'praying', 'alongside', 'keep-going', 'grace-peace', 'custom')
+//       - customMessage: string | null (optional key; required 1..280 chars with at least one non-whitespace char when presetId == 'custom'; omitted or null otherwise)
 //       - cohortTitle: string | null (required key, null or 1..80 chars)
 //       - sentCount: int (required, 1..100000, increments by +1 on sender update)
 //       - sentAt: timestamp (required, must equal request.time on create and sender update)
@@ -1051,7 +1052,7 @@ service cloud.firestore {
     }
 
     function isValidEncouragement(data, recipientUid, senderUid) {
-      let keys = [
+      let requiredKeys = [
         'senderUid',
         'recipientUid',
         'senderName',
@@ -1062,8 +1063,20 @@ service cloud.firestore {
         'sentAt',
         'acknowledgedAt'
       ];
-      return hasOnlyAllowedFields(keys) &&
-        hasRequiredFields(keys) &&
+      let allowedKeys = [
+        'senderUid',
+        'recipientUid',
+        'senderName',
+        'senderPhotoURL',
+        'presetId',
+        'customMessage',
+        'cohortTitle',
+        'sentCount',
+        'sentAt',
+        'acknowledgedAt'
+      ];
+      return hasOnlyAllowedFields(allowedKeys) &&
+        hasRequiredFields(requiredKeys) &&
         isValidUidString(senderUid) &&
         isValidUidString(recipientUid) &&
         senderUid != recipientUid &&
@@ -1074,7 +1087,14 @@ service cloud.firestore {
         isValidDisplayName(data.senderName) &&
         isValidOptionalPhotoUrl(data.senderPhotoURL) &&
         data.presetId is string &&
-        data.presetId in ['praying', 'alongside', 'keep-going', 'grace-peace'] &&
+        data.presetId in ['praying', 'alongside', 'keep-going', 'grace-peace', 'custom'] &&
+        (data.presetId == 'custom'
+          ? ('customMessage' in data &&
+             data.customMessage is string &&
+             data.customMessage.size() >= 1 &&
+             data.customMessage.size() <= 280 &&
+             data.customMessage.matches("^[\\s\\S]*\\S[\\s\\S]*$"))
+          : (!('customMessage' in data) || data.customMessage == null)) &&
         (data.cohortTitle == null ||
           (data.cohortTitle is string &&
            data.cohortTitle.size() >= 1 &&

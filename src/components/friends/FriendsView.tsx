@@ -54,8 +54,8 @@ const ReadTogetherModal = lazy(() =>
 );
 
 interface FriendsViewProps {
-  onBack: () => void;
-  backLabel: string;
+  onBack?: () => void;
+  backLabel?: string;
   onOpenAccount: () => void;
   onNavigateToPlan?: (localPlanId: string) => void;
 }
@@ -691,14 +691,16 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     <div className="space-y-6 sm:space-y-7">
       {/* Page Header */}
       <section className="border-b border-[var(--border-subtle)] pb-5 sm:pb-6">
-        <button
-          type="button"
-          onClick={onBack}
-          className="tactile-press mb-3 inline-flex min-h-9 items-center gap-1.5 text-xs font-medium text-[var(--color-accent)] underline-offset-4 hover:underline"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>Back to {backLabel}</span>
-        </button>
+        {onBack && backLabel && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="tactile-press mb-3 inline-flex min-h-9 items-center gap-1.5 text-xs font-medium text-[var(--color-accent)] underline-offset-4 hover:underline"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Back to {backLabel}</span>
+          </button>
+        )}
 
         <div className="max-w-[60ch]">
           <h1 className="font-display text-2xl font-medium tracking-tight text-[var(--text-primary)] sm:text-[2.15rem]">

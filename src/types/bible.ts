@@ -294,7 +294,8 @@ export type EncouragementPresetId =
   | 'praying'
   | 'alongside'
   | 'keep-going'
-  | 'grace-peace';
+  | 'grace-peace'
+  | 'custom';
 
 export interface QuietEncouragement {
   senderUid: string;
@@ -302,6 +303,7 @@ export interface QuietEncouragement {
   senderName: string;
   senderPhotoURL: string | null;
   presetId: EncouragementPresetId;
+  customMessage?: string | null;
   cohortTitle: string | null;
   sentCount: number;
   sentAt: string;

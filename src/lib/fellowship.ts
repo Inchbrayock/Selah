@@ -33,6 +33,7 @@ export const ENCOURAGEMENT_PRESETS: readonly EncouragementPresetOption[] = [
 ] as const;
 
 export const ENCOURAGEMENT_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+export const MAX_CUSTOM_ENCOURAGEMENT_LENGTH = 280;
 
 export const DEFAULT_FELLOWSHIP_STATS: FellowshipStatsCounters = {
   friendsPeak: 0,
@@ -55,8 +56,14 @@ export function sanitizeFellowshipStats(
   };
 }
 
+export function sanitizeCustomEncouragementMessage(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim().slice(0, MAX_CUSTOM_ENCOURAGEMENT_LENGTH);
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export function isValidEncouragementPresetId(value: unknown): value is EncouragementPresetId {
-  return ENCOURAGEMENT_PRESETS.some((item) => item.id === value);
+  return value === 'custom' || ENCOURAGEMENT_PRESETS.some((item) => item.id === value);
 }
 
 export function getEncouragementPresetLabel(presetId: EncouragementPresetId): string {
@@ -64,6 +71,17 @@ export function getEncouragementPresetLabel(presetId: EncouragementPresetId): st
     ENCOURAGEMENT_PRESETS.find((item) => item.id === presetId)?.label ??
     'Praying for your reading today'
   );
+}
+
+export function getEncouragementDisplayText(encouragement: {
+  presetId: EncouragementPresetId;
+  customMessage?: string | null;
+}): string {
+  if (encouragement.presetId === 'custom') {
+    const custom = sanitizeCustomEncouragementMessage(encouragement.customMessage);
+    if (custom) return custom;
+  }
+  return getEncouragementPresetLabel(encouragement.presetId);
 }
 
 export function getEncouragementCooldownRemainingMs(

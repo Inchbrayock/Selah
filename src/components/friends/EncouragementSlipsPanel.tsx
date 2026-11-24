@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Check, Feather } from 'lucide-react';
 import { formatShortDate } from '../../lib/dates';
-import { getEncouragementPresetLabel } from '../../lib/fellowship';
+import { getEncouragementDisplayText } from '../../lib/fellowship';
 import { SPRING_TACTILE, TACTILE_TAP } from '../../lib/motion';
 import { useFriendsStore } from '../../store/useBibleStore';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
@@ -96,8 +96,8 @@ export const EncouragementSlipsPanel: React.FC = () => {
                     textClassName="text-xs"
                   />
                   <div className="min-w-0">
-                    <p className="font-display text-base italic leading-snug text-[var(--text-primary)]">
-                      “{getEncouragementPresetLabel(item.presetId)}”
+                    <p className="break-words whitespace-pre-wrap font-display text-base italic leading-snug text-[var(--text-primary)]">
+                      “{getEncouragementDisplayText(item)}”
                     </p>
                     <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
                       From <span className="font-medium text-[var(--text-primary)]">{item.senderName}</span>

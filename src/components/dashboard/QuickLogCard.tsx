@@ -20,6 +20,7 @@ export const QuickLogCard: React.FC<QuickLogCardProps> = ({
   const {
     bookId,
     selectBook,
+    advanceBookIfFinished,
     chaptersText,
     setChaptersText,
     readDate,
@@ -63,13 +64,17 @@ export const QuickLogCard: React.FC<QuickLogCardProps> = ({
   };
 
   const handleOneClickNext = async () => {
+    const loggedBookId = selectedBook.id;
+    const loggedShortName = selectedBook.shortName;
+    const loggedChapter = nextChapter;
     await logChapters({
-      bookId: selectedBook.id,
-      chapters: [nextChapter],
+      bookId: loggedBookId,
+      chapters: [loggedChapter],
       readDate: todayPlainDate(),
     });
+    advanceBookIfFinished(loggedBookId, [loggedChapter], { keepSyncingSuggested: true });
     setLoggedSource('quick');
-    triggerStamp(`+1 ch · ${selectedBook.shortName} ${nextChapter}`);
+    triggerStamp(`+1 ch · ${loggedShortName} ${loggedChapter}`);
     setTimeout(() => setLoggedSource((prev) => (prev === 'quick' ? null : prev)), 2200);
   };
 
@@ -78,11 +83,16 @@ export const QuickLogCard: React.FC<QuickLogCardProps> = ({
     const parsed = parseAndValidateChapters();
     if (!parsed) return;
 
+    const loggedBookId = selectedBook.id;
+    const effectiveDate = readDate || todayPlainDate();
     await logChapters({
-      bookId: selectedBook.id,
+      bookId: loggedBookId,
       chapters: parsed,
-      readDate: readDate || todayPlainDate(),
+      readDate: effectiveDate,
       note,
+    });
+    advanceBookIfFinished(loggedBookId, parsed, {
+      keepSyncingSuggested: effectiveDate === todayPlainDate(),
     });
     setChaptersText('');
     setNote('');

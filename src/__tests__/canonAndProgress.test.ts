@@ -10,6 +10,8 @@ import {
   computeBibleProgress,
   computeStreaks,
   formatChapterRanges,
+  getNextCanonicalBookId,
+  getSuggestedBookId,
   parseChapterInput,
 } from '../lib/progress';
 import type { ReadingLogEntry } from '../types/bible';
@@ -147,5 +149,36 @@ describe('Progress and Streak computation', () => {
     expect(weeklyResult.currentStreak).toBe(10);
     expect(weeklyResult.longestStreak).toBe(10);
     expect(weeklyResult.graceUsedThisWeek).toBe(true);
+  });
+
+  it('advances suggested book to the next canonical book after finishing a book', () => {
+    // Brand-new reader defaults to John
+    expect(getSuggestedBookId(computeBibleProgress([]))).toBe('john');
+
+    // Finishing Ruth advances to 1 Samuel (even if John is partially read)
+    const afterRuth = computeBibleProgress([
+      { id: '1', bookId: 'john', chapters: [1], readDate: '2026-11-01', loggedAt: '2026-11-01T07:00:00Z' },
+      { id: '2', bookId: 'ruth', chapters: [1, 2, 3, 4], readDate: '2026-11-02', loggedAt: '2026-11-02T07:00:00Z' },
+    ]);
+    expect(getSuggestedBookId(afterRuth)).toBe('1-samuel');
+
+    // Finishing Jude advances to Revelation
+    const afterJude = computeBibleProgress([
+      { id: '3', bookId: 'jude', chapters: [1], readDate: '2026-11-03', loggedAt: '2026-11-03T07:00:00Z' },
+    ]);
+    expect(getSuggestedBookId(afterJude)).toBe('revelation');
+
+    // Finishing Revelation wraps around to Genesis
+    const afterRev = computeBibleProgress([
+      {
+        id: '4',
+        bookId: 'revelation',
+        chapters: Array.from({ length: 22 }, (_, i) => i + 1),
+        readDate: '2026-11-04',
+        loggedAt: '2026-11-04T07:00:00Z',
+      },
+    ]);
+    expect(getSuggestedBookId(afterRev)).toBe('genesis');
+    expect(getNextCanonicalBookId('revelation')).toBe('genesis');
   });
 });

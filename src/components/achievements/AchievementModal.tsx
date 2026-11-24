@@ -113,7 +113,7 @@ export const AchievementModal: React.FC<AchievementModalProps> = ({
               }}
               transition={tilt.active ? SPRING_GENTLE : SPRING_SEAL}
               style={{ transformStyle: 'preserve-3d' }}
-              className="relative flex items-center justify-center p-6"
+              className="relative flex h-[176px] w-[176px] items-center justify-center"
             >
               {/* Ceremonial arrival light wave on unlocked seals */}
               {achievement.unlocked && (
@@ -122,50 +122,11 @@ export const AchievementModal: React.FC<AchievementModalProps> = ({
                   initial={{ scale: 0.52, opacity: 0.6 }}
                   animate={{ scale: 1.55, opacity: 0 }}
                   transition={{ duration: 0.9, ease: FOLIO_EASE }}
-                  className="pointer-events-none absolute h-32 w-32 rounded-full border-2 border-[var(--color-lamp)]"
+                  className="pointer-events-none absolute inset-0 m-auto h-32 w-32 rounded-full border-2 border-[var(--color-lamp)]"
                 />
               )}
 
-              {/* Counter-rotating astrolabe rings */}
-              {achievement.unlocked && (
-                <>
-                  <svg
-                    width="174"
-                    height="174"
-                    viewBox="0 0 174 174"
-                    aria-hidden="true"
-                    className="halo-spin-anim pointer-events-none absolute inset-0 m-auto opacity-30"
-                  >
-                    <circle
-                      cx="87"
-                      cy="87"
-                      r="74"
-                      fill="none"
-                      stroke="var(--color-accent)"
-                      strokeWidth="1"
-                      strokeDasharray="3 7"
-                    />
-                  </svg>
-                  <svg
-                    width="154"
-                    height="154"
-                    viewBox="0 0 154 154"
-                    aria-hidden="true"
-                    className="halo-spin-reverse-anim pointer-events-none absolute inset-0 m-auto opacity-25"
-                  >
-                    <circle
-                      cx="77"
-                      cy="77"
-                      r="61"
-                      fill="none"
-                      stroke="var(--color-lamp)"
-                      strokeWidth="0.9"
-                      strokeDasharray="1.5 6"
-                    />
-                  </svg>
-                </>
-              )}
-
+              {/* Concentric medallion & counter-rotating astrolabe rings */}
               <motion.div
                 animate={
                   achievement.unlocked && !tilt.active
@@ -177,33 +138,74 @@ export const AchievementModal: React.FC<AchievementModalProps> = ({
                     ? { duration: 4.4, repeat: Infinity, ease: 'easeInOut' }
                     : { duration: 0.2 }
                 }
-                className="relative overflow-hidden rounded-full"
+                className="relative flex h-[176px] w-[176px] items-center justify-center"
               >
-                <MedallionIcon
-                  motif={achievement.definition.motif}
-                  tier={achievement.definition.tier}
-                  unlocked={achievement.unlocked}
-                  size={116}
-                  label={achievement.definition.title}
-                />
-
-                {/* Dynamic specular reflection & opening glint sweep */}
                 {achievement.unlocked && (
                   <>
-                    <span
+                    <svg
+                      width="174"
+                      height="174"
+                      viewBox="0 0 174 174"
                       aria-hidden="true"
-                      className="pointer-events-none absolute inset-0 rounded-full transition-opacity duration-200"
-                      style={{
-                        opacity: tilt.active ? 0.42 : 0.16,
-                        background: `radial-gradient(circle at ${tilt.gx}% ${tilt.gy}%, rgba(255,255,255,0.65) 0%, rgba(255,255,255,0.12) 34%, transparent 66%)`,
-                      }}
-                    />
-                    <span
+                      className="halo-spin-anim pointer-events-none absolute inset-0 m-auto opacity-30"
+                    >
+                      <circle
+                        cx="87"
+                        cy="87"
+                        r="74"
+                        fill="none"
+                        stroke="var(--color-accent)"
+                        strokeWidth="1"
+                        strokeDasharray="3 7"
+                      />
+                    </svg>
+                    <svg
+                      width="154"
+                      height="154"
+                      viewBox="0 0 154 154"
                       aria-hidden="true"
-                      className="sheen-sweep-anim pointer-events-none absolute inset-y-0 -left-1/2 w-1/2 bg-gradient-to-r from-transparent via-white/40 to-transparent opacity-0"
-                    />
+                      className="halo-spin-reverse-anim pointer-events-none absolute inset-0 m-auto opacity-25"
+                    >
+                      <circle
+                        cx="77"
+                        cy="77"
+                        r="61"
+                        fill="none"
+                        stroke="var(--color-lamp)"
+                        strokeWidth="0.9"
+                        strokeDasharray="1.5 6"
+                      />
+                    </svg>
                   </>
                 )}
+
+                <div className="relative overflow-hidden rounded-full">
+                  <MedallionIcon
+                    motif={achievement.definition.motif}
+                    tier={achievement.definition.tier}
+                    unlocked={achievement.unlocked}
+                    size={116}
+                    label={achievement.definition.title}
+                  />
+
+                  {/* Dynamic specular reflection & opening glint sweep */}
+                  {achievement.unlocked && (
+                    <>
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 rounded-full transition-opacity duration-200"
+                        style={{
+                          opacity: tilt.active ? 0.42 : 0.16,
+                          background: `radial-gradient(circle at ${tilt.gx}% ${tilt.gy}%, rgba(255,255,255,0.65) 0%, rgba(255,255,255,0.12) 34%, transparent 66%)`,
+                        }}
+                      />
+                      <span
+                        aria-hidden="true"
+                        className="sheen-sweep-anim pointer-events-none absolute inset-y-0 -left-1/2 w-1/2 bg-gradient-to-r from-transparent via-white/40 to-transparent opacity-0"
+                      />
+                    </>
+                  )}
+                </div>
               </motion.div>
             </motion.div>
           </div>

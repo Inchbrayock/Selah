@@ -57,7 +57,7 @@ import {
   buildSharedCustomPlanId,
   computeCohortMemberProgress,
   getActiveLocalPlanIdForCohort,
-  getEncouragementPresetLabel,
+  getEncouragementDisplayText,
   sanitizeFellowshipStats,
 } from '../lib/fellowship';
 import { isFirebaseConfigured, shouldEagerlyLoadFirebase } from '../lib/firebaseConfig';
@@ -225,6 +225,7 @@ export interface FriendsContextValue {
   sendQuietEncouragement: (input: {
     recipientUid: string;
     presetId: EncouragementPresetId;
+    customMessage?: string | null;
     cohortTitle?: string | null;
   }) => Promise<void>;
   acknowledgeQuietEncouragement: (senderUid: string) => Promise<void>;
@@ -3010,6 +3011,7 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     async (input: {
       recipientUid: string;
       presetId: EncouragementPresetId;
+      customMessage?: string | null;
       cohortTitle?: string | null;
     }) => {
       const activeUser = userRef.current;
@@ -3024,6 +3026,7 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         ownPrivacy: prefsRef.current.friendPrivacy,
         recipientUid: input.recipientUid,
         presetId: input.presetId,
+        customMessage: input.customMessage,
         cohortTitle: input.cohortTitle,
       });
 
@@ -3050,7 +3053,11 @@ export const BibleStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         },
       });
 
-      setAnnouncement(`Sent encouragement: "${getEncouragementPresetLabel(input.presetId)}".`);
+      const sentText = getEncouragementDisplayText({
+        presetId: input.presetId,
+        customMessage: input.customMessage,
+      });
+      setAnnouncement(`Sent encouragement: "${sentText}".`);
     },
     [persistCurrentFriendCache, updatePreferences]
   );

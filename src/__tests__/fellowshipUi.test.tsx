@@ -477,8 +477,8 @@ describe('Shared Reading, Encouragements, and Friend Bonus Milestones', () => {
       ]);
     });
 
-    // Profile attention badge highlights the pending shared plan invite
-    expect(await screen.findByTestId('profile-attention-badge')).toHaveTextContent('1');
+    // Friends nav attention badge highlights the pending shared plan invite
+    expect(await screen.findByTestId('friends-attention-badge')).toHaveTextContent('1');
 
     expect(await screen.findByText('Thirty Days in Psalms')).toBeInTheDocument();
     expect(screen.getByText(/Invited by Miriam/i)).toBeInTheDocument();
@@ -492,7 +492,7 @@ describe('Shared Reading, Encouragements, and Friend Bonus Milestones', () => {
     expect(screen.getByText('12/30 ch')).toBeInTheDocument();
   }, 15000);
 
-  it('displays and marks encouragements read inside Friends and enforces the 12-hour send cooldown', async () => {
+  it('displays and marks encouragements read inside Friends, supports custom messages, and enforces the 12-hour send cooldown', async () => {
     const sentIso = new Date().toISOString();
     fellowshipMocks.sendQuietEncouragement.mockResolvedValue({ sentAt: sentIso });
 
@@ -515,7 +515,8 @@ describe('Shared Reading, Encouragements, and Friend Bonus Milestones', () => {
           recipientUid: 'uid_hannah',
           senderName: 'Miriam',
           senderPhotoURL: null,
-          presetId: 'praying',
+          presetId: 'custom',
+          customMessage: 'Loved Psalm 23 today — praying for your week!',
           cohortTitle: 'Thirty Days in Psalms',
           sentCount: 1,
           sentAt: '2026-04-02T09:00:00.000Z',
@@ -524,13 +525,16 @@ describe('Shared Reading, Encouragements, and Friend Bonus Milestones', () => {
       ]);
     });
 
-    // Profile attention badge reflects unread encouragement
-    expect(await screen.findByTestId('profile-attention-badge')).toHaveTextContent('1');
+    // Friends nav attention badge reflects unread encouragement
+    expect(await screen.findByTestId('friends-attention-badge')).toHaveTextContent('1');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open Friends' }));
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    fireEvent.click(within(nav).getByRole('button', { name: /^Friends$/i }));
 
     expect(await screen.findByRole('heading', { name: 'Encouragements' })).toBeInTheDocument();
-    expect(screen.getByText('“Praying for your reading today”')).toBeInTheDocument();
+    expect(
+      screen.getByText('“Loved Psalm 23 today — praying for your week!”')
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Mark read' }));
     await waitFor(() => {
@@ -540,24 +544,29 @@ describe('Shared Reading, Encouragements, and Friend Bonus Milestones', () => {
       });
     });
 
-    // Open Miriam's friend dialog and send an encouragement
+    // Open Miriam's friend dialog and send a custom encouragement message
     fireEvent.click(screen.getByRole('button', { name: /Miriam/i }));
-    const presetButton = await screen.findByRole('button', { name: /Reading along with you/i });
-    fireEvent.click(presetButton);
+    const customInput = await screen.findByLabelText(/Or write a personal note/i);
+    fireEvent.change(customInput, {
+      target: { value: 'So encouraged by your faithfulness in Psalms!' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^Send note$/i }));
 
     await waitFor(() => {
       expect(fellowshipMocks.sendQuietEncouragement).toHaveBeenCalledWith(
         expect.objectContaining({
           recipientUid: 'uid_miriam',
-          presetId: 'alongside',
+          presetId: 'custom',
+          customMessage: 'So encouraged by your faithfulness in Psalms!',
         })
       );
     });
 
-    // 12-hour cooldown immediately disables repeat sending
+    // 12-hour cooldown immediately disables repeat sending (presets & custom input)
     expect(
       await screen.findByText(/You can send one every 12 hours/i)
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Grace and peace as you read/i })).toBeDisabled();
+    expect(screen.getByLabelText(/Or write a personal note/i)).toBeDisabled();
   }, 15000);
 });

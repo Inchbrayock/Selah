@@ -30,14 +30,45 @@ export function formatPercent(read: number, total: number): string {
 }
 
 /**
- * Picks the best default book for quick-logging: last read book if unfinished,
- * else first in-progress book, else John.
+ * Returns the next canonical book after `bookId` (wrapping Revelation -> Genesis).
+ * When `summary` is provided, skips already-completed books to land on the next
+ * book with an unread chapter; if all 66 books are completed, returns the immediate
+ * next canonical book.
+ */
+export function getNextCanonicalBookId(
+  bookId: string,
+  summary?: BibleProgressSummary
+): string {
+  const idx = BIBLE_BOOKS.findIndex((b) => b.id === bookId);
+  if (idx === -1) return 'john';
+
+  if (summary) {
+    for (let offset = 1; offset <= BIBLE_BOOKS.length; offset++) {
+      const candidate = BIBLE_BOOKS[(idx + offset) % BIBLE_BOOKS.length];
+      const progress = summary.bookProgressById[candidate.id];
+      if (!progress || progress.nextUnreadChapter !== null) {
+        return candidate.id;
+      }
+    }
+  }
+
+  return BIBLE_BOOKS[(idx + 1) % BIBLE_BOOKS.length].id;
+}
+
+/**
+ * Picks the best default book for quick-logging:
+ * 1. Last read book if it still has unread chapters.
+ * 2. If the last read book is completed, the next canonical book (wrapping around).
+ * 3. Else first in-progress book, else John for brand-new readers.
  */
 export function getSuggestedBookId(summary: BibleProgressSummary): string {
   if (summary.lastReadBookId) {
     const lastProgress = summary.bookProgressById[summary.lastReadBookId];
-    if (lastProgress && lastProgress.nextUnreadChapter !== null) {
-      return lastProgress.book.id;
+    if (lastProgress) {
+      if (lastProgress.nextUnreadChapter !== null) {
+        return lastProgress.book.id;
+      }
+      return getNextCanonicalBookId(lastProgress.book.id, summary);
     }
   }
   const inProgress = BIBLE_BOOKS.find((b) => {

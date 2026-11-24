@@ -56,6 +56,7 @@ const PRIMARY_TAB_LABELS: Record<PrimaryTab, string> = {
   library: 'Books',
   achievements: 'Milestones',
   journal: 'Journal & Plans',
+  friends: 'Friends',
 };
 
 const TAB_TITLES: Record<AppTab, string> = {
@@ -147,7 +148,7 @@ const SanctuaryAppContent: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<AppTab>(initialRoute?.tab ?? 'dashboard');
   const [returnTab, setReturnTab] = useState<PrimaryTab>(
-    initialRoute && initialRoute.tab !== 'settings' && initialRoute.tab !== 'friends'
+    initialRoute && initialRoute.tab !== 'settings'
       ? initialRoute.tab
       : 'dashboard'
   );
@@ -172,7 +173,7 @@ const SanctuaryAppContent: React.FC = () => {
       options?: { journalSubTab?: 'journal' | 'plans'; skipHashPush?: boolean }
     ) => {
       const nextJournalSubTab = options?.journalSubTab ?? 'journal';
-      if (nextTab === 'settings' || nextTab === 'friends') {
+      if (nextTab === 'settings') {
         setOpenBookId(null);
       } else {
         setReturnTab(nextTab);
@@ -259,7 +260,7 @@ const SanctuaryAppContent: React.FC = () => {
         setOpenBookId(null);
         return true;
       }
-      if (state.activeTab === 'settings' || state.activeTab === 'friends') {
+      if (state.activeTab === 'settings') {
         navigateToTab(returnTabRef.current);
         return true;
       }
@@ -352,8 +353,6 @@ const SanctuaryAppContent: React.FC = () => {
               )}
               {activeTab === 'friends' && (
                 <FriendsView
-                  onBack={() => navigateToTab(returnTab)}
-                  backLabel={PRIMARY_TAB_LABELS[returnTab]}
                   onOpenAccount={() => setAccountOpen(true)}
                   onNavigateToPlan={() => navigateToTab('journal', { journalSubTab: 'plans' })}
                 />
@@ -395,7 +394,6 @@ const SanctuaryAppContent: React.FC = () => {
       <AccountDialog
         open={accountOpen}
         onClose={() => setAccountOpen(false)}
-        onOpenFriends={() => navigateToTab('friends')}
         onOpenSettings={() => navigateToTab('settings')}
         onEditPhoto={() => setPhotoEditorOpen(true)}
         anchorRef={accountAnchorRef}

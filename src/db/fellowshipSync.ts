@@ -29,6 +29,7 @@ import {
   getEncouragementCooldownRemainingMs,
   isValidEncouragementPresetId,
   materializeSharedCohortPlan,
+  sanitizeCustomEncouragementMessage,
 } from '../lib/fellowship';
 import { getFirebaseServices } from '../lib/firebase';
 import {
@@ -171,6 +172,10 @@ export function docToQuietEncouragement(
   if (!senderUid || senderUid === recipientUid) return null;
   if (!isValidEncouragementPresetId(data.presetId)) return null;
 
+  const customMessage =
+    data.presetId === 'custom' ? sanitizeCustomEncouragementMessage(data.customMessage) : null;
+  if (data.presetId === 'custom' && !customMessage) return null;
+
   const sentCount =
     typeof data.sentCount === 'number' && Number.isFinite(data.sentCount)
       ? Math.max(1, Math.min(100000, Math.round(data.sentCount)))
@@ -188,6 +193,7 @@ export function docToQuietEncouragement(
       typeof data.senderName === 'string' && data.senderName ? data.senderName : 'Selah Reader',
     senderPhotoURL: sanitizeHttpsPhotoUrl(data.senderPhotoURL),
     presetId: data.presetId,
+    customMessage,
     cohortTitle,
     sentCount,
     sentAt: timestampToIso(data.sentAt),
@@ -548,11 +554,20 @@ export async function sendQuietEncouragement(params: {
   ownPrivacy?: FriendPrivacySettings;
   recipientUid: string;
   presetId: EncouragementPresetId;
+  customMessage?: string | null;
   cohortTitle?: string | null;
 }): Promise<{ sentAt: string }> {
   const services = getFirebaseServices();
   if (!services) {
     throw new Error('Cloud sync is required to send an encouragement note.');
+  }
+
+  const normalizedCustomMessage =
+    params.presetId === 'custom'
+      ? sanitizeCustomEncouragementMessage(params.customMessage)
+      : null;
+  if (params.presetId === 'custom' && !normalizedCustomMessage) {
+    throw new Error('Write a short message of encouragement before sending.');
   }
 
   const ref = doc(
@@ -578,6 +593,7 @@ export async function sendQuietEncouragement(params: {
         senderName,
         senderPhotoURL,
         presetId: params.presetId,
+        customMessage: normalizedCustomMessage,
         cohortTitle: normalizedCohortTitle,
         sentCount: 1,
         sentAt: serverTimestamp(),
@@ -612,6 +628,7 @@ export async function sendQuietEncouragement(params: {
       senderName,
       senderPhotoURL,
       presetId: params.presetId,
+      customMessage: normalizedCustomMessage,
       cohortTitle: normalizedCohortTitle,
       sentCount: nextSentCount,
       sentAt: serverTimestamp(),

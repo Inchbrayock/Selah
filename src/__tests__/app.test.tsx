@@ -120,6 +120,29 @@ describe('Selah Bible Tracker App UI', () => {
     });
   });
 
+  it('automatically advances Quick Log to the next book and chapter when finishing a book', async () => {
+    render(<App />);
+    expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
+
+    // Select a 1-chapter book (Philemon) and finish it via Quick Log -> should advance to Hebrews 1
+    fireEvent.change(screen.getByLabelText(/^Book$/i), { target: { value: 'philemon' } });
+    fireEvent.click(screen.getByRole('button', { name: /Quick Log: Phlm 1/i }));
+
+    expect(
+      await screen.findByRole('button', { name: /Quick Log: Heb 1/i })
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Book$/i)).toHaveValue('hebrews');
+
+    // Select Jude (1 chapter) and finish it via Quick Log -> should advance to Revelation 1
+    fireEvent.change(screen.getByLabelText(/^Book$/i), { target: { value: 'jude' } });
+    fireEvent.click(screen.getByRole('button', { name: /Quick Log: Jude 1/i }));
+
+    expect(
+      await screen.findByRole('button', { name: /Quick Log: Rev 1/i })
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Book$/i)).toHaveValue('revelation');
+  });
+
   it('opens dedicated Settings page from profile popover, switches color scheme, and navigates back', async () => {
     render(<App />);
     expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
