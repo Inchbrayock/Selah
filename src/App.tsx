@@ -1,55 +1,28 @@
-import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { LazyMotion, MotionConfig, domAnimation, m } from 'motion/react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { MotionConfig } from 'motion/react';
+import { AchievementModal } from './components/achievements/AchievementModal';
+import { AchievementsView } from './components/achievements/AchievementsView';
 import { AccountDialog } from './components/auth/AccountDialog';
 import { MergeBanner } from './components/auth/MergeBanner';
+import { ProfilePhotoDialog } from './components/auth/ProfilePhotoDialog';
 import { DashboardView } from './components/dashboard/DashboardView';
+import { FriendsView } from './components/friends/FriendsView';
+import { JournalView } from './components/journal/JournalView';
+import { BookDetailDialog } from './components/library/BookDetailDialog';
+import { LibraryView } from './components/library/LibraryView';
+import { SettingsView } from './components/settings/SettingsView';
 import { AppHeader, type AppTab, type PrimaryTab } from './components/ui/AppHeader';
 import { CelebrationToast } from './components/ui/CelebrationToast';
 import { UpdateBanner } from './components/ui/UpdateBanner';
-import { FOLIO_EASE } from './lib/motion';
 import { hideNativeSplashScreen, subscribeNativeBackButton } from './lib/nativeShell';
 import { AppUpdaterProvider } from './lib/useAppUpdater';
 import {
   BibleStoreProvider,
   useAccountSync,
-  useFriendsStore,
   useReadingData,
   useUiFeedback,
 } from './store/useBibleStore';
 import type { AchievementStatus } from './types/bible';
-
-const LibraryView = lazy(() =>
-  import('./components/library/LibraryView').then((mod) => ({ default: mod.LibraryView }))
-);
-const AchievementsView = lazy(() =>
-  import('./components/achievements/AchievementsView').then((mod) => ({
-    default: mod.AchievementsView,
-  }))
-);
-const JournalView = lazy(() =>
-  import('./components/journal/JournalView').then((mod) => ({ default: mod.JournalView }))
-);
-const FriendsView = lazy(() =>
-  import('./components/friends/FriendsView').then((mod) => ({ default: mod.FriendsView }))
-);
-const SettingsView = lazy(() =>
-  import('./components/settings/SettingsView').then((mod) => ({ default: mod.SettingsView }))
-);
-const BookDetailDialog = lazy(() =>
-  import('./components/library/BookDetailDialog').then((mod) => ({
-    default: mod.BookDetailDialog,
-  }))
-);
-const AchievementModal = lazy(() =>
-  import('./components/achievements/AchievementModal').then((mod) => ({
-    default: mod.AchievementModal,
-  }))
-);
-const ProfilePhotoDialog = lazy(() =>
-  import('./components/auth/ProfilePhotoDialog').then((mod) => ({
-    default: mod.ProfilePhotoDialog,
-  }))
-);
 
 const PRIMARY_TAB_LABELS: Record<PrimaryTab, string> = {
   dashboard: 'Home',
@@ -110,11 +83,32 @@ function routeToHash(tab: AppTab, journalSubTab: 'journal' | 'plans'): string {
   }
 }
 
-const ViewLoadingFallback: React.FC = () => (
-  <div className="folio-sheet p-8 text-center text-sm text-[var(--text-secondary)]">
-    Loading…
-  </div>
-);
+const FooterTagline: React.FC = () => {
+  const { user } = useAccountSync();
+  return (
+    <span>
+      {user
+        ? 'Synced Bible reading tracker across 66 books and 1,189 chapters.'
+        : 'Track your Bible reading across 66 books and 1,189 chapters, with optional cloud sync.'}
+    </span>
+  );
+};
+
+const ProfilePhotoDialogBridge: React.FC<{
+  open: boolean;
+  onClose: () => void;
+}> = ({ open, onClose }) => {
+  const { user } = useAccountSync();
+
+  useEffect(() => {
+    if (!user && open) {
+      onClose();
+    }
+  }, [onClose, open, user]);
+
+  if (!open || !user) return null;
+  return <ProfilePhotoDialog open={true} onClose={onClose} />;
+};
 
 const LiveAnnouncer: React.FC = () => {
   const { announcement } = useUiFeedback();
@@ -138,11 +132,7 @@ const CelebrationToastBridge: React.FC<{
   );
 };
 
-const SanctuaryAppContent: React.FC = () => {
-  const { ready } = useReadingData();
-  const { user } = useAccountSync();
-  const { setFriendsDetailActive } = useFriendsStore();
-
+const SanctuaryAppContent: React.FC<{ ready: boolean }> = React.memo(({ ready }) => {
   const initialRoute =
     typeof window !== 'undefined' ? parseHashRoute(window.location.hash) : null;
 
@@ -190,13 +180,6 @@ const SanctuaryAppContent: React.FC = () => {
     []
   );
 
-  // Only keep per-friend live Firestore profile listeners attached on screens that show them
-  useEffect(() => {
-    const needsFriendProfiles =
-      activeTab === 'dashboard' || activeTab === 'friends' || activeTab === 'journal';
-    setFriendsDetailActive(needsFriendProfiles);
-  }, [activeTab, setFriendsDetailActive]);
-
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handleHashChange = () => {
@@ -236,12 +219,6 @@ const SanctuaryAppContent: React.FC = () => {
   }, [ready]);
 
   useEffect(() => {
-    if (!user) {
-      setPhotoEditorOpen(false);
-    }
-  }, [user]);
-
-  useEffect(() => {
     return subscribeNativeBackButton(() => {
       const state = backStateRef.current;
       if (state.photoEditorOpen) {
@@ -279,9 +256,29 @@ const SanctuaryAppContent: React.FC = () => {
     }
   }, [activeTab]);
 
+  const handleToggleAccount = useCallback(() => setAccountOpen((prev) => !prev), []);
+  const handleOpenAccount = useCallback(() => setAccountOpen(true), []);
+  const handleCloseAccount = useCallback(() => setAccountOpen(false), []);
+  const handleOpenPhotoEditor = useCallback(() => setPhotoEditorOpen(true), []);
+  const handleClosePhotoEditor = useCallback(() => setPhotoEditorOpen(false), []);
+  const handleCloseBook = useCallback(() => setOpenBookId(null), []);
+  const handleCloseAchievement = useCallback(() => setInspectedAchievement(null), []);
+  const handleInspectAchievement = useCallback((status: AchievementStatus) => {
+    setInspectedAchievement({ status, isNew: false });
+  }, []);
   const handleInspectNewAchievement = useCallback((status: AchievementStatus) => {
     setInspectedAchievement({ status, isNew: true });
   }, []);
+  const handleOpenFriends = useCallback(() => navigateToTab('friends'), [navigateToTab]);
+  const handleOpenSettings = useCallback(() => navigateToTab('settings'), [navigateToTab]);
+  const handleOpenPlans = useCallback(
+    () => navigateToTab('journal', { journalSubTab: 'plans' }),
+    [navigateToTab]
+  );
+  const handleBackFromSettings = useCallback(
+    () => navigateToTab(returnTabRef.current),
+    [navigateToTab]
+  );
 
   return (
     <div className="min-h-dvh flex flex-col overflow-x-clip">
@@ -291,8 +288,8 @@ const SanctuaryAppContent: React.FC = () => {
 
       <AppHeader
         activeTab={activeTab}
-        onSelectTab={(tab) => navigateToTab(tab)}
-        onOpenAccount={() => setAccountOpen((prev) => !prev)}
+        onSelectTab={navigateToTab}
+        onOpenAccount={handleToggleAccount}
         accountOpen={accountOpen}
         accountButtonRef={accountAnchorRef}
       />
@@ -309,56 +306,43 @@ const SanctuaryAppContent: React.FC = () => {
             Loading your reading history…
           </div>
         ) : (
-          <m.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.14, ease: FOLIO_EASE }}
-          >
-            <Suspense fallback={<ViewLoadingFallback />}>
-              {activeTab === 'dashboard' && (
-                <DashboardView
-                  onOpenBook={setOpenBookId}
-                  onInspectAchievement={(status) =>
-                    setInspectedAchievement({ status, isNew: false })
-                  }
-                  onNavigateTab={(tab, options) => navigateToTab(tab, options)}
-                  onOpenFriends={() => navigateToTab('friends')}
-                />
-              )}
-              {activeTab === 'library' && <LibraryView onOpenBook={setOpenBookId} />}
-              {activeTab === 'achievements' && (
-                <AchievementsView
-                  onInspectAchievement={(status) =>
-                    setInspectedAchievement({ status, isNew: false })
-                  }
-                />
-              )}
-              {activeTab === 'journal' && (
-                <JournalView
-                  onOpenBook={setOpenBookId}
-                  initialSubTab={journalInitialTab}
-                  onOpenAccount={() => setAccountOpen(true)}
-                  onOpenFriends={() => navigateToTab('friends')}
-                />
-              )}
-              {activeTab === 'settings' && (
-                <SettingsView
-                  onBack={() => navigateToTab(returnTab)}
-                  backLabel={PRIMARY_TAB_LABELS[returnTab]}
-                  onOpenAccount={() => setAccountOpen(true)}
-                  onEditPhoto={() => setPhotoEditorOpen(true)}
-                  onOpenFriends={() => navigateToTab('friends')}
-                />
-              )}
-              {activeTab === 'friends' && (
-                <FriendsView
-                  onOpenAccount={() => setAccountOpen(true)}
-                  onNavigateToPlan={() => navigateToTab('journal', { journalSubTab: 'plans' })}
-                />
-              )}
-            </Suspense>
-          </m.div>
+          <div key={activeTab}>
+            {activeTab === 'dashboard' && (
+              <DashboardView
+                onOpenBook={setOpenBookId}
+                onInspectAchievement={handleInspectAchievement}
+                onNavigateTab={navigateToTab}
+                onOpenFriends={handleOpenFriends}
+              />
+            )}
+            {activeTab === 'library' && <LibraryView onOpenBook={setOpenBookId} />}
+            {activeTab === 'achievements' && (
+              <AchievementsView onInspectAchievement={handleInspectAchievement} />
+            )}
+            {activeTab === 'journal' && (
+              <JournalView
+                onOpenBook={setOpenBookId}
+                initialSubTab={journalInitialTab}
+                onOpenAccount={handleOpenAccount}
+                onOpenFriends={handleOpenFriends}
+              />
+            )}
+            {activeTab === 'settings' && (
+              <SettingsView
+                onBack={handleBackFromSettings}
+                backLabel={PRIMARY_TAB_LABELS[returnTab]}
+                onOpenAccount={handleOpenAccount}
+                onEditPhoto={handleOpenPhotoEditor}
+                onOpenFriends={handleOpenFriends}
+              />
+            )}
+            {activeTab === 'friends' && (
+              <FriendsView
+                onOpenAccount={handleOpenAccount}
+                onNavigateToPlan={handleOpenPlans}
+              />
+            )}
+          </div>
         )}
       </main>
 
@@ -367,68 +351,55 @@ const SanctuaryAppContent: React.FC = () => {
           <span className="font-display text-sm font-medium text-[var(--text-primary)]">
             Selah
           </span>
-          <span>
-            {user
-              ? 'Synced Bible reading tracker across 66 books and 1,189 chapters.'
-              : 'Track your Bible reading across 66 books and 1,189 chapters, with optional cloud sync.'}
-          </span>
+          <FooterTagline />
         </div>
       </footer>
 
       {openBookId !== null && (
-        <Suspense fallback={null}>
-          <BookDetailDialog bookId={openBookId} onClose={() => setOpenBookId(null)} />
-        </Suspense>
+        <BookDetailDialog bookId={openBookId} onClose={handleCloseBook} />
       )}
 
       {inspectedAchievement !== null && (
-        <Suspense fallback={null}>
-          <AchievementModal
-            achievement={inspectedAchievement.status}
-            isNewUnlock={inspectedAchievement.isNew}
-            onClose={() => setInspectedAchievement(null)}
-          />
-        </Suspense>
+        <AchievementModal
+          achievement={inspectedAchievement.status}
+          isNewUnlock={inspectedAchievement.isNew}
+          onClose={handleCloseAchievement}
+        />
       )}
 
       <AccountDialog
         open={accountOpen}
-        onClose={() => setAccountOpen(false)}
-        onOpenSettings={() => navigateToTab('settings')}
-        onEditPhoto={() => setPhotoEditorOpen(true)}
+        onClose={handleCloseAccount}
+        onOpenSettings={handleOpenSettings}
+        onEditPhoto={handleOpenPhotoEditor}
         anchorRef={accountAnchorRef}
       />
 
-      {photoEditorOpen && Boolean(user) && (
-        <Suspense fallback={null}>
-          <ProfilePhotoDialog open={true} onClose={() => setPhotoEditorOpen(false)} />
-        </Suspense>
-      )}
+      <ProfilePhotoDialogBridge open={photoEditorOpen} onClose={handleClosePhotoEditor} />
 
       <CelebrationToastBridge onInspect={handleInspectNewAchievement} />
       <LiveAnnouncer />
     </div>
   );
-};
+});
+SanctuaryAppContent.displayName = 'SanctuaryAppContent';
 
 const SanctuaryShell: React.FC = () => {
   const { ready } = useReadingData();
   return (
     <AppUpdaterProvider ready={ready}>
-      <SanctuaryAppContent />
+      <SanctuaryAppContent ready={ready} />
     </AppUpdaterProvider>
   );
 };
 
 export function App() {
   return (
-    <LazyMotion features={domAnimation}>
-      <MotionConfig reducedMotion="user">
-        <BibleStoreProvider>
-          <SanctuaryShell />
-        </BibleStoreProvider>
-      </MotionConfig>
-    </LazyMotion>
+    <MotionConfig reducedMotion="user">
+      <BibleStoreProvider>
+        <SanctuaryShell />
+      </BibleStoreProvider>
+    </MotionConfig>
   );
 }
 

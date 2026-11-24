@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Compass, Plus, ScrollText, Search, X } from 'lucide-react';
 import { BOOKS_BY_ID } from '../../data/bibleCanon';
@@ -89,17 +89,20 @@ export const JournalView: React.FC<JournalViewProps> = ({
     setDivision('ALL');
   };
 
-  const handleOpenPlanFromLog = (planId: string) => {
-    void activateReadingPlan(planId);
-    setSubTab('plans');
-  };
+  const handleOpenPlanFromLog = useCallback(
+    (planId: string) => {
+      void activateReadingPlan(planId);
+      setSubTab('plans');
+    },
+    [activateReadingPlan]
+  );
 
-  const handleInspectJournalFromPlan = (queryText: string) => {
+  const handleInspectJournalFromPlan = useCallback((queryText: string) => {
     setSearch(queryText);
     setLens('reflections');
     setDivision('ALL');
     setSubTab('journal');
-  };
+  }, []);
 
   const scrollToMonth = (monthKey: string) => {
     if (typeof document === 'undefined') return;
@@ -333,19 +336,14 @@ export const JournalView: React.FC<JournalViewProps> = ({
       </section>
 
       {subTab === 'plans' ? (
-        <motion.div
-          key="plans-panel"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: FOLIO_EASE }}
-        >
+        <div key="plans-panel">
           <PlansView
             onOpenBook={onOpenBook}
             onInspectJournalNotes={handleInspectJournalFromPlan}
             onOpenAccount={onOpenAccount}
             onOpenFriends={onOpenFriends}
           />
-        </motion.div>
+        </div>
       ) : (
         <div className="space-y-5 sm:space-y-6">
           <AnimatePresence initial={false}>

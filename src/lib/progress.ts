@@ -397,15 +397,20 @@ export function computeBibleProgress(
   };
 }
 
+const dailyChapterCountsCache = new WeakMap<ReadingLogEntry[], Record<string, number>>();
+
 /**
  * Returns daily chapter count map (YYYY-MM-DD -> chapters read) for heatmaps & charts.
  */
 export function buildDailyChapterCounts(logs: ReadingLogEntry[]): Record<string, number> {
+  const cached = dailyChapterCountsCache.get(logs);
+  if (cached) return cached;
   const counts: Record<string, number> = {};
   for (const log of logs) {
     const count = new Set(log.chapters).size;
     counts[log.readDate] = (counts[log.readDate] ?? 0) + count;
   }
+  dailyChapterCountsCache.set(logs, counts);
   return counts;
 }
 

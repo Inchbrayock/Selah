@@ -27,6 +27,13 @@ interface MosaicTestamentGroupProps {
   onHoverTile: (tile: HoveredTile | null) => void;
 }
 
+const CHAPTER_NUMBERS_BY_BOOK_ID: Record<string, number[]> = Object.fromEntries(
+  BIBLE_BOOKS.map((book) => [
+    book.id,
+    Array.from({ length: book.chapterCount }, (_, idx) => idx + 1),
+  ])
+);
+
 const MosaicTestamentGroup = React.memo<MosaicTestamentGroupProps>(
   ({ title, subtitle, books, bookProgressById, onSelectBook, onHoverTile }) => {
     const handleMouseOver = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -75,8 +82,7 @@ const MosaicTestamentGroup = React.memo<MosaicTestamentGroupProps>(
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-[3px]">
-                  {Array.from({ length: book.chapterCount }, (_, idx) => {
-                    const ch = idx + 1;
+                  {CHAPTER_NUMBERS_BY_BOOK_ID[book.id].map((ch) => {
                     const state = bp?.chapterMap[ch];
                     const readCount = state?.readCount ?? 0;
                     const bg = readCount > 0 ? divMeta.colorVar : 'var(--bg-subtle)';

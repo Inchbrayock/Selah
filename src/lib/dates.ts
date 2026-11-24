@@ -217,11 +217,18 @@ function buildHeatmapGrid(
   return { days, monthLabels, weekCount };
 }
 
+const heatmapCalendarCache = new Map<string, HeatmapCalendarData>();
+const MAX_HEATMAP_CACHE = 16;
+
 /**
  * Generates an array of YYYY-MM-DD strings aligned to Sunday..Saturday columns
  * covering the last `weeks` weeks ending on `endDateIso`.
  */
 export function buildHeatmapCalendar(endDateIso: string, weeks = 52): HeatmapCalendarData {
+  const cacheKey = `rolling|${endDateIso}|${weeks}`;
+  const cached = heatmapCalendarCache.get(cacheKey);
+  if (cached) return cached;
+
   const endIndex = toUtcDayIndex(endDateIso);
   const end = fromUtcDayIndex(endIndex);
   // Convert ISO dayOfWeek (1=Mon..7=Sun) to Sunday-first index (0=Sun..6=Sat)
@@ -229,7 +236,12 @@ export function buildHeatmapCalendar(endDateIso: string, weeks = 52): HeatmapCal
   const endWeekSaturdayIndex = endIndex + (6 - endSundayOffset);
   const startSundayIndex = endWeekSaturdayIndex - (weeks * 7 - 1);
 
-  return buildHeatmapGrid(startSundayIndex, weeks, endIndex);
+  const result = buildHeatmapGrid(startSundayIndex, weeks, endIndex);
+  if (heatmapCalendarCache.size >= MAX_HEATMAP_CACHE) {
+    heatmapCalendarCache.clear();
+  }
+  heatmapCalendarCache.set(cacheKey, result);
+  return result;
 }
 
 /**
@@ -240,6 +252,10 @@ export function buildYearHeatmapCalendar(
   year: number,
   todayIso = todayPlainDate()
 ): HeatmapCalendarData {
+  const cacheKey = `year|${year}|${todayIso}`;
+  const cached = heatmapCalendarCache.get(cacheKey);
+  if (cached) return cached;
+
   const todayIndex = toUtcDayIndex(todayIso);
   const jan1Index = Math.floor(Date.UTC(year, 0, 1) / MS_PER_DAY);
   const dec31Index = Math.floor(Date.UTC(year, 11, 31) / MS_PER_DAY);
@@ -255,5 +271,10 @@ export function buildYearHeatmapCalendar(
   const totalDays = endSaturdayIndex - startSundayIndex + 1;
   const weekCount = Math.round(totalDays / 7);
 
-  return buildHeatmapGrid(startSundayIndex, weekCount, todayIndex, year);
+  const result = buildHeatmapGrid(startSundayIndex, weekCount, todayIndex, year);
+  if (heatmapCalendarCache.size >= MAX_HEATMAP_CACHE) {
+    heatmapCalendarCache.clear();
+  }
+  heatmapCalendarCache.set(cacheKey, result);
+  return result;
 }

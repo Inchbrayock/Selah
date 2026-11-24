@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   BookOpen,
@@ -35,20 +35,12 @@ import {
 } from '../../store/useBibleStore';
 import type { ReadingPlan, SharedPlanCohort } from '../../types/bible';
 import { ActivePlanFocusCard } from './ActivePlanFocusCard';
-import type { CustomPlanDraft } from './CustomPlanBuilder';
+import { CustomPlanBuilder, type CustomPlanDraft } from './CustomPlanBuilder';
+import { PlanFinderView } from './PlanFinderView';
 import { PlanJourneyMatrix } from './PlanJourneyMatrix';
 import { PlanSelectorStrip } from './PlanSelectorStrip';
 import { ReadTogetherBand } from './ReadTogetherBand';
-
-const CustomPlanBuilder = lazy(() =>
-  import('./CustomPlanBuilder').then((mod) => ({ default: mod.CustomPlanBuilder }))
-);
-const PlanFinderView = lazy(() =>
-  import('./PlanFinderView').then((mod) => ({ default: mod.PlanFinderView }))
-);
-const ReadTogetherModal = lazy(() =>
-  import('./ReadTogetherModal').then((mod) => ({ default: mod.ReadTogetherModal }))
-);
+import { ReadTogetherModal } from './ReadTogetherModal';
 
 interface PlansViewProps {
   onOpenBook?: (bookId: string) => void;
@@ -309,51 +301,35 @@ export const PlansView: React.FC<PlansViewProps> = ({
 
   if (mode === 'finder') {
     return (
-      <Suspense
-        fallback={
-          <div className="folio-sheet p-8 text-center text-sm text-[var(--text-secondary)]">
-            Loading plan catalog…
-          </div>
-        }
-      >
-        <PlanFinderView
-          plans={allPlans}
-          activePlanId={hasActiveShelfPlan ? activePlan.id : null}
-          shelfPlanIds={preferences.shelfPlanIds}
-          progressByPlanId={progressByPlanId}
-          onSelectPlan={(planId) => {
-            setRecentlyRemoved(null);
-            void activateReadingPlan(planId);
-            setMode('workspace');
-          }}
-          onClose={() => setMode('workspace')}
-          onCreateCustomPlan={() => openNewBuilder('finder')}
-          onEditCustomPlan={(plan) => openEditBuilder(plan, 'finder')}
-          onCustomizeCopy={(plan) => openCopyBuilder(plan, 'finder')}
-          onDeleteCustomPlan={async (id) => {
-            setRecentlyRemoved(null);
-            await removeCustomPlan(id);
-          }}
-        />
-      </Suspense>
+      <PlanFinderView
+        plans={allPlans}
+        activePlanId={hasActiveShelfPlan ? activePlan.id : null}
+        shelfPlanIds={preferences.shelfPlanIds}
+        progressByPlanId={progressByPlanId}
+        onSelectPlan={(planId) => {
+          setRecentlyRemoved(null);
+          void activateReadingPlan(planId);
+          setMode('workspace');
+        }}
+        onClose={() => setMode('workspace')}
+        onCreateCustomPlan={() => openNewBuilder('finder')}
+        onEditCustomPlan={(plan) => openEditBuilder(plan, 'finder')}
+        onCustomizeCopy={(plan) => openCopyBuilder(plan, 'finder')}
+        onDeleteCustomPlan={async (id) => {
+          setRecentlyRemoved(null);
+          await removeCustomPlan(id);
+        }}
+      />
     );
   }
 
   if (mode === 'builder') {
     return (
-      <Suspense
-        fallback={
-          <div className="folio-sheet p-8 text-center text-sm text-[var(--text-secondary)]">
-            Loading custom plan builder…
-          </div>
-        }
-      >
-        <CustomPlanBuilder
-          initialDraft={builderDraft}
-          onSave={handleSaveBuilderPlan}
-          onCancel={() => setMode(builderReturnMode)}
-        />
-      </Suspense>
+      <CustomPlanBuilder
+        initialDraft={builderDraft}
+        onSave={handleSaveBuilderPlan}
+        onCancel={() => setMode(builderReturnMode)}
+      />
     );
   }
 
@@ -740,16 +716,14 @@ export const PlansView: React.FC<PlansViewProps> = ({
       )}
 
       {readTogetherModal && (
-        <Suspense fallback={null}>
-          <ReadTogetherModal
-            open={true}
-            plan={readTogetherModal.plan}
-            existingCohort={readTogetherModal.existingCohort}
-            onClose={() => setReadTogetherModal(null)}
-            onOpenAccount={onOpenAccount}
-            onOpenFriends={onOpenFriends}
-          />
-        </Suspense>
+        <ReadTogetherModal
+          open={true}
+          plan={readTogetherModal.plan}
+          existingCohort={readTogetherModal.existingCohort}
+          onClose={() => setReadTogetherModal(null)}
+          onOpenAccount={onOpenAccount}
+          onOpenFriends={onOpenFriends}
+        />
       )}
     </div>
   );

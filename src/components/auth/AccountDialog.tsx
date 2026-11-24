@@ -96,8 +96,7 @@ const GoogleMark: React.FC = () => (
   </svg>
 );
 
-export const AccountDialog: React.FC<AccountDialogProps> = ({
-  open,
+const AccountDialogPanel: React.FC<Omit<AccountDialogProps, 'open'>> = ({
   onClose,
   onOpenSettings,
   onEditPhoto,
@@ -132,20 +131,18 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
   const [editingName, setEditingName] = useState(false);
-  const [nameDraft, setNameDraft] = useState('');
+  const [nameDraft, setNameDraft] = useState(() => user?.displayName ?? '');
   const [placement, setPlacement] = useState<PopoverPlacement>(() =>
     computePopoverPlacement(anchorRef?.current)
   );
 
   const panelRef = useRef<HTMLDivElement>(null);
-  const wasOpenRef = useRef(false);
 
   const updatePlacement = useCallback(() => {
     setPlacement(computePopoverPlacement(anchorRef?.current));
   }, [anchorRef]);
 
   useLayoutEffect(() => {
-    if (!open) return;
     updatePlacement();
     window.addEventListener('resize', updatePlacement);
     window.addEventListener('scroll', updatePlacement, { passive: true });
@@ -153,18 +150,13 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
       window.removeEventListener('resize', updatePlacement);
       window.removeEventListener('scroll', updatePlacement);
     };
-  }, [open, updatePlacement]);
+  }, [updatePlacement]);
 
   useEffect(() => {
-    if (open && !wasOpenRef.current) {
-      panelRef.current?.focus({ preventScroll: true });
-    }
-    wasOpenRef.current = open;
-  }, [open]);
+    panelRef.current?.focus({ preventScroll: true });
+  }, []);
 
   useEffect(() => {
-    if (!open) return;
-
     const handleOutsidePress = (e: Event) => {
       const target = e.target as Node | null;
       if (!target) return;
@@ -190,24 +182,19 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
       document.removeEventListener('mousedown', handleOutsidePress);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open, onClose, anchorRef]);
+  }, [onClose, anchorRef]);
 
   useEffect(() => {
-    if (open) {
-      setErrorMsg(null);
-      setStatusMsg(null);
-      setEditingName(false);
-      if (firebaseAvailable && !user) {
-        void ensureAuthReady();
-      }
+    if (firebaseAvailable && !user) {
+      void ensureAuthReady();
     }
-  }, [ensureAuthReady, firebaseAvailable, open, user]);
+  }, [ensureAuthReady, firebaseAvailable, user]);
 
   useEffect(() => {
-    if (open && !editingName) {
+    if (!editingName) {
       setNameDraft(user?.displayName ?? '');
     }
-  }, [open, editingName, user?.displayName]);
+  }, [editingName, user?.displayName]);
 
   const unlockedCount = achievements.filter((a) => a.unlocked).length;
 
@@ -323,27 +310,25 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
 
   const SyncIcon = syncBadge.icon;
 
-  const popoverContent = (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          ref={panelRef}
-          role="dialog"
-          aria-labelledby="account-dialog-title"
-          tabIndex={-1}
-          data-testid="account-popover"
-          initial={{ opacity: 0, y: -6, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -4, scale: 0.98 }}
-          transition={SPRING_TACTILE}
-          style={{
-            top: `${placement.top}px`,
-            right: `${placement.right}px`,
-            width: `${placement.maxWidth}px`,
-            maxHeight: `${placement.maxHeight}px`,
-          }}
-          className="fixed z-50 flex origin-top-right flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_20px_48px_-12px_rgba(12,16,24,0.28),0_4px_14px_-4px_rgba(12,16,24,0.12)] outline-none"
-        >
+  return (
+    <motion.div
+      ref={panelRef}
+      role="dialog"
+      aria-labelledby="account-dialog-title"
+      tabIndex={-1}
+      data-testid="account-popover"
+      initial={{ opacity: 0, y: -6, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -4, scale: 0.98 }}
+      transition={SPRING_TACTILE}
+      style={{
+        top: `${placement.top}px`,
+        right: `${placement.right}px`,
+        width: `${placement.maxWidth}px`,
+        maxHeight: `${placement.maxHeight}px`,
+      }}
+      className="fixed z-50 flex origin-top-right flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_20px_48px_-12px_rgba(12,16,24,0.28),0_4px_14px_-4px_rgba(12,16,24,0.12)] outline-none"
+    >
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-3.5 sm:px-5">
             <div className="min-w-0">
               <h2
@@ -824,8 +809,28 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
             </div>
           )}
           </div>
-        </motion.div>
-      )}
+    </motion.div>
+  );
+};
+
+export const AccountDialog: React.FC<AccountDialogProps> = ({
+  open,
+  onClose,
+  onOpenSettings,
+  onEditPhoto,
+  anchorRef,
+}) => {
+  const popoverContent = (
+    <AnimatePresence>
+      {open ? (
+        <AccountDialogPanel
+          key="account-popover"
+          onClose={onClose}
+          onOpenSettings={onOpenSettings}
+          onEditPhoto={onEditPhoto}
+          anchorRef={anchorRef}
+        />
+      ) : null}
     </AnimatePresence>
   );
 

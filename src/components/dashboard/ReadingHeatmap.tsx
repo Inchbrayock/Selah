@@ -129,7 +129,24 @@ const HeatmapGrid = React.memo<HeatmapGridProps>(
 );
 HeatmapGrid.displayName = 'HeatmapGrid';
 
-export const ReadingHeatmap: React.FC = () => {
+const preparedWeeksCache = new WeakMap<HeatmapDay[], PreparedHeatmapCell[][]>();
+
+function getPreparedWeeks(days: HeatmapDay[], weekCount: number): PreparedHeatmapCell[][] {
+  const cached = preparedWeeksCache.get(days);
+  if (cached) return cached;
+  const prepared: PreparedHeatmapCell[] = days.map((day) => ({
+    ...day,
+    formattedDate: day.isOutsideRange ? '' : formatPlainDate(day.date),
+  }));
+  const cols: PreparedHeatmapCell[][] = [];
+  for (let w = 0; w < weekCount; w++) {
+    cols.push(prepared.slice(w * 7, w * 7 + 7));
+  }
+  preparedWeeksCache.set(days, cols);
+  return cols;
+}
+
+export const ReadingHeatmap: React.FC = React.memo(() => {
   const { logs, summary } = useReadingData();
   const today = todayPlainDate();
   const currentYear = parsePlainDate(today).year;
@@ -186,18 +203,8 @@ export const ReadingHeatmap: React.FC = () => {
     }
   }, [activeFilter, currentYear, days, today, weekCount]);
 
-  // Precompute formatted dates once per calendar range instead of on every render
-  const weeks = useMemo(() => {
-    const prepared: PreparedHeatmapCell[] = days.map((day) => ({
-      ...day,
-      formattedDate: day.isOutsideRange ? '' : formatPlainDate(day.date),
-    }));
-    const cols: PreparedHeatmapCell[][] = [];
-    for (let w = 0; w < weekCount; w++) {
-      cols.push(prepared.slice(w * 7, w * 7 + 7));
-    }
-    return cols;
-  }, [days, weekCount]);
+  // Precompute and cache formatted dates per calendar range across tab switches
+  const weeks = useMemo(() => getPreparedWeeks(days, weekCount), [days, weekCount]);
 
   const monthLabelByWeek = useMemo(() => {
     const map = new Map<number, string>();
@@ -485,4 +492,5 @@ export const ReadingHeatmap: React.FC = () => {
       </div>
     </section>
   );
-};
+});
+ReadingHeatmap.displayName = 'ReadingHeatmap';

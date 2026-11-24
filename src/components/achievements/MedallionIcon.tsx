@@ -272,7 +272,7 @@ function renderMotifPaths(motif: AchievementMotif, stroke: string) {
   }
 }
 
-export const MedallionIcon: React.FC<MedallionIconProps> = ({
+export const MedallionIcon: React.FC<MedallionIconProps> = React.memo(({
   motif,
   tier,
   unlocked,
@@ -293,16 +293,18 @@ export const MedallionIcon: React.FC<MedallionIconProps> = ({
       aria-hidden={label ? undefined : true}
       className="shrink-0"
     >
-      <defs>
-        <linearGradient id={`${uid}-ring`} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor={palette.ringStart} />
-          <stop offset="100%" stopColor={palette.ringEnd} />
-        </linearGradient>
-        <radialGradient id={`${uid}-face`} cx="35%" cy="30%" r="75%">
-          <stop offset="0%" stopColor={palette.faceStart} />
-          <stop offset="100%" stopColor={palette.faceEnd} />
-        </radialGradient>
-      </defs>
+      {unlocked && (
+        <defs>
+          <linearGradient id={`${uid}-ring`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor={palette.ringStart} />
+            <stop offset="100%" stopColor={palette.ringEnd} />
+          </linearGradient>
+          <radialGradient id={`${uid}-face`} cx="35%" cy="30%" r="75%">
+            <stop offset="0%" stopColor={palette.faceStart} />
+            <stop offset="100%" stopColor={palette.faceEnd} />
+          </radialGradient>
+        </defs>
+      )}
 
       <circle
         cx="32"
@@ -336,4 +338,5 @@ export const MedallionIcon: React.FC<MedallionIconProps> = ({
       <g opacity={unlocked ? 1 : 0.42}>{renderMotifPaths(motif, stroke)}</g>
     </svg>
   );
-};
+});
+MedallionIcon.displayName = 'MedallionIcon';

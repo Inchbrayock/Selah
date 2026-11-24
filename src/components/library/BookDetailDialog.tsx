@@ -249,6 +249,13 @@ export const BookDetailDialog: React.FC<BookDetailDialogProps> = ({ bookId, onCl
     [book, bp?.chapterMap, lastAnchorChapter, logChapters, rangeStart, tapMode, toggleChapter, triggerChapterStamps]
   );
 
+  const onChapterButtonClick = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>, chapter: number) => {
+      void handleChapterClick(e, chapter);
+    },
+    [handleChapterClick]
+  );
+
   const handleMarkAll = async () => {
     if (!book || !bp) return;
     const unread: number[] = [];
@@ -561,7 +568,7 @@ export const BookDetailDialog: React.FC<BookDetailDialogProps> = ({ bookId, onCl
               tapMode={tapMode}
               rangeStart={rangeStart}
               stampedChapters={stampedChapters}
-              onChapterClick={(e, ch) => void handleChapterClick(e, ch)}
+              onChapterClick={onChapterButtonClick}
             />
             </div>
           </div>

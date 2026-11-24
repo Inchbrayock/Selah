@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowLeft,
@@ -38,20 +38,15 @@ import type {
   SharedPlanCohort,
 } from '../../types/bible';
 import { ReadTogetherBand } from '../journal/ReadTogetherBand';
+import { ReadTogetherModal } from '../journal/ReadTogetherModal';
 import { InlineDeleteConfirm } from '../ui/InlineDeleteConfirm';
 import { ProfileAvatar } from '../ui/ProfileAvatar';
 import { SanctuaryLamp } from '../ui/SanctuaryLamp';
 import { EncouragementSlipsPanel } from './EncouragementSlipsPanel';
+import { FriendFolioDialog } from './FriendFolioDialog';
 import { FriendPrivacyPanel } from './FriendPrivacyPanel';
 import { MiniCanonicalSpine } from './MiniCanonicalSpine';
 import { UsernameEditor } from './UsernameEditor';
-
-const FriendFolioDialog = lazy(() =>
-  import('./FriendFolioDialog').then((mod) => ({ default: mod.FriendFolioDialog }))
-);
-const ReadTogetherModal = lazy(() =>
-  import('../journal/ReadTogetherModal').then((mod) => ({ default: mod.ReadTogetherModal }))
-);
 
 interface FriendsViewProps {
   onBack?: () => void;
@@ -1101,7 +1096,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                           >
                             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
                               <div className="flex min-w-0 items-center gap-3">
-                                <SanctuaryLamp active={lampActive} size={28} />
+                                <SanctuaryLamp active={lampActive} size={28} animated={false} />
                                 <ProfileAvatar
                                   user={{
                                     displayName: conn.displayName,
@@ -1491,33 +1486,29 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
       )}
 
       {selectedConnection && (
-        <Suspense fallback={null}>
-          <FriendFolioDialog
-            connection={selectedConnection}
-            onClose={() => setSelectedFriendUid(null)}
-            onInviteToPlan={(friendUid) => handleOpenStartSharedPlan(friendUid)}
-          />
-        </Suspense>
+        <FriendFolioDialog
+          connection={selectedConnection}
+          onClose={() => setSelectedFriendUid(null)}
+          onInviteToPlan={(friendUid) => handleOpenStartSharedPlan(friendUid)}
+        />
       )}
 
       {readTogetherOpen && (
-        <Suspense fallback={null}>
-          <ReadTogetherModal
-            open={true}
-            plan={modalPlan}
-            availablePlans={inviteCohort ? undefined : allPlans}
-            existingCohort={inviteCohort}
-            initialFriendUid={preselectedFriendUid}
-            onClose={() => {
-              setReadTogetherOpen(false);
-              setInviteCohort(null);
-              setPreselectedFriendUid(null);
-            }}
-            onCreated={() => setSubTab('shared')}
-            onOpenAccount={onOpenAccount}
-            onOpenFriends={() => setSubTab('find')}
-          />
-        </Suspense>
+        <ReadTogetherModal
+          open={true}
+          plan={modalPlan}
+          availablePlans={inviteCohort ? undefined : allPlans}
+          existingCohort={inviteCohort}
+          initialFriendUid={preselectedFriendUid}
+          onClose={() => {
+            setReadTogetherOpen(false);
+            setInviteCohort(null);
+            setPreselectedFriendUid(null);
+          }}
+          onCreated={() => setSubTab('shared')}
+          onOpenAccount={onOpenAccount}
+          onOpenFriends={() => setSubTab('find')}
+        />
       )}
     </div>
   );

@@ -8,7 +8,7 @@ interface BookCardProps {
   onSelect: (bookId: string) => void;
 }
 
-export const BookCard: React.FC<BookCardProps> = ({ progress, onSelect }) => {
+export const BookCard: React.FC<BookCardProps> = React.memo(({ progress, onSelect }) => {
   const { book, readChapters, totalChapters, percentage, completed, completedCycles } = progress;
   const division = DIVISION_META_BY_ID[book.division];
 
@@ -83,4 +83,5 @@ export const BookCard: React.FC<BookCardProps> = ({ progress, onSelect }) => {
       </div>
     </button>
   );
-};
+});
+BookCard.displayName = 'BookCard';

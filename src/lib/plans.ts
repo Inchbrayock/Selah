@@ -149,11 +149,37 @@ export function getPlanOrderLabel(order: ReadingPlanOrder | undefined): string {
   }
 }
 
+const chapterRangeCache = new WeakMap<number[], string>();
+const planProgressCache = new WeakMap<
+  BibleProgressSummary,
+  WeakMap<ReadingPlan, PlanProgressState>
+>();
+const planCoverageCache = new WeakMap<ReadingPlan, PlanCoverageMeta>();
+const planStagesCache = new WeakMap<PlanDayStatus[], PlanStage[]>();
+const planNotesCache = new WeakMap<
+  ReadingLogEntry[],
+  WeakMap<ReadingPlan, Record<number, ReadingLogEntry[]>>
+>();
+const planPaceCache = new WeakMap<ReadingPlan, number>();
+const planBookNamesCache = new WeakMap<ReadingPlan, string[]>();
+
+function getCachedChapterRange(chapters: number[]): string {
+  const cached = chapterRangeCache.get(chapters);
+  if (cached !== undefined) return cached;
+  const formatted = formatChapterRanges(chapters);
+  chapterRangeCache.set(chapters, formatted);
+  return formatted;
+}
+
 /** Computes per-day, per-assignment, and overall progress for a reading plan from chapter logs. */
 export function computePlanProgress(
   plan: ReadingPlan,
   summary: BibleProgressSummary
 ): PlanProgressState {
+  let byPlan = planProgressCache.get(summary);
+  const cached = byPlan?.get(plan);
+  if (cached) return cached;
+
   let totalChaptersCount = 0;
   let readChaptersCount = 0;
   let partialDaysCount = 0;
@@ -166,13 +192,18 @@ export function computePlanProgress(
       const book = BOOKS_BY_ID[a.bookId];
       const bp = summary.bookProgressById[a.bookId];
       const chCount = a.chapters.length;
-      const readInAssignment = a.chapters.filter((ch) => Boolean(bp?.chapterMap[ch])).length;
+      let readInAssignment = 0;
+      if (bp) {
+        for (let i = 0; i < chCount; i++) {
+          if (bp.chapterMap[a.chapters[i]]) readInAssignment += 1;
+        }
+      }
       const assignmentDone = chCount > 0 && readInAssignment === chCount;
 
       dayTotal += chCount;
       dayRead += readInAssignment;
 
-      const rangeText = formatChapterRanges(a.chapters);
+      const rangeText = getCachedChapterRange(a.chapters);
       return {
         bookId: a.bookId,
         bookName: book?.name ?? a.bookId,
@@ -211,7 +242,7 @@ export function computePlanProgress(
   const percentage =
     plan.durationDays > 0 ? Math.round((completedDaysCount / plan.durationDays) * 100) : 0;
 
-  return {
+  const result: PlanProgressState = {
     dayStatuses,
     completedDaysCount,
     partialDaysCount,
@@ -221,6 +252,13 @@ export function computePlanProgress(
     nextDay,
     percentage,
   };
+
+  if (!byPlan) {
+    byPlan = new WeakMap();
+    planProgressCache.set(summary, byPlan);
+  }
+  byPlan.set(plan, result);
+  return result;
 }
 
 /** Returns only the unread chapters needed to mark a reading plan day complete. */
@@ -241,6 +279,9 @@ export function getUnreadAssignmentsForDay(
 
 /** Derives canonical book count, total chapters, and daily chapter average for a plan. */
 export function getPlanCoverageMeta(plan: ReadingPlan): PlanCoverageMeta {
+  const cached = planCoverageCache.get(plan);
+  if (cached) return cached;
+
   const books = new Set<string>();
   let totalChapters = 0;
   for (const day of plan.days) {
@@ -250,11 +291,13 @@ export function getPlanCoverageMeta(plan: ReadingPlan): PlanCoverageMeta {
     }
   }
   const avg = plan.durationDays > 0 ? (totalChapters / plan.durationDays).toFixed(1) : '0';
-  return {
+  const result: PlanCoverageMeta = {
     bookCount: books.size,
     totalChapters,
     avgChaptersPerDay: avg.endsWith('.0') ? avg.slice(0, -2) : avg,
   };
+  planCoverageCache.set(plan, result);
+  return result;
 }
 
 /**
@@ -265,6 +308,8 @@ export function getPlanCoverageMeta(plan: ReadingPlan): PlanCoverageMeta {
  */
 export function buildPlanStages(plan: ReadingPlan, dayStatuses: PlanDayStatus[]): PlanStage[] {
   if (dayStatuses.length === 0) return [];
+  const cached = planStagesCache.get(dayStatuses);
+  if (cached) return cached;
 
   const slices: { label: string; days: PlanDayStatus[] }[] = [];
 
@@ -306,7 +351,7 @@ export function buildPlanStages(plan: ReadingPlan, dayStatuses: PlanDayStatus[])
     }
   }
 
-  return slices.map((slice, idx) => ({
+  const result = slices.map((slice, idx) => ({
     id: `stage-${idx + 1}`,
     index: idx,
     label: slice.label,
@@ -316,6 +361,8 @@ export function buildPlanStages(plan: ReadingPlan, dayStatuses: PlanDayStatus[])
     completedCount: slice.days.filter((d) => d.done).length,
     partialCount: slice.days.filter((d) => d.partial).length,
   }));
+  planStagesCache.set(dayStatuses, result);
+  return result;
 }
 
 /**
@@ -326,8 +373,20 @@ export function matchPlanDayNotes(
   plan: ReadingPlan,
   logs: ReadingLogEntry[]
 ): Record<number, ReadingLogEntry[]> {
+  let byPlan = planNotesCache.get(logs);
+  const cached = byPlan?.get(plan);
+  if (cached) return cached;
+
   const notedLogs = logs.filter((l) => Boolean(l.note && l.note.trim().length > 0));
-  if (notedLogs.length === 0) return {};
+  if (notedLogs.length === 0) {
+    const empty: Record<number, ReadingLogEntry[]> = {};
+    if (!byPlan) {
+      byPlan = new WeakMap();
+      planNotesCache.set(logs, byPlan);
+    }
+    byPlan.set(plan, empty);
+    return empty;
+  }
 
   // Index logs by bookId for fast lookup across 365-day plans
   const logsByBook = new Map<string, { log: ReadingLogEntry; chapterSet: Set<number> }[]>();
@@ -368,11 +427,18 @@ export function matchPlanDayNotes(
     }
   }
 
+  if (!byPlan) {
+    byPlan = new WeakMap();
+    planNotesCache.set(logs, byPlan);
+  }
+  byPlan.set(plan, result);
   return result;
 }
 
 /** Returns numeric average chapters per day for a reading plan. */
 export function getPlanNumericPace(plan: ReadingPlan): number {
+  const cached = planPaceCache.get(plan);
+  if (cached !== undefined) return cached;
   if (plan.durationDays <= 0) return 0;
   let totalChapters = 0;
   for (const day of plan.days) {
@@ -380,11 +446,15 @@ export function getPlanNumericPace(plan: ReadingPlan): number {
       totalChapters += assignment.chapters.length;
     }
   }
-  return totalChapters / plan.durationDays;
+  const pace = totalChapters / plan.durationDays;
+  planPaceCache.set(plan, pace);
+  return pace;
 }
 
 /** Lists distinct canonical book names covered by a reading plan in appearance order. */
 export function getPlanBookNames(plan: ReadingPlan): string[] {
+  const cached = planBookNamesCache.get(plan);
+  if (cached) return cached;
   const seen = new Set<string>();
   const names: string[] = [];
   for (const day of plan.days) {
@@ -395,6 +465,7 @@ export function getPlanBookNames(plan: ReadingPlan): string[] {
       if (book) names.push(book.name);
     }
   }
+  planBookNamesCache.set(plan, names);
   return names;
 }
 

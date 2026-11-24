@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { Check, Lock } from 'lucide-react';
 import { formatPlainDate } from '../../lib/dates';
-import { SPRING_TACTILE, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
+import { SPRING_TACTILE } from '../../lib/motion';
 import { useReadingData } from '../../store/useBibleStore';
 import type { AchievementCategory, AchievementStatus, AchievementTier } from '../../types/bible';
 import { MedallionIcon } from './MedallionIcon';
@@ -37,7 +37,10 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
   const [category, setCategory] = useState<'all' | AchievementCategory>('all');
   const [onlyUnlocked, setOnlyUnlocked] = useState(false);
 
-  const unlockedCount = achievements.filter((a) => a.unlocked).length;
+  const unlockedCount = useMemo(
+    () => achievements.filter((a) => a.unlocked).length,
+    [achievements]
+  );
 
   const tierStats = useMemo(() => {
     return TIER_ORDER.map((tier) => {
@@ -91,13 +94,12 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
             {CATEGORIES.map((cat) => {
               const isActive = category === cat.id;
               return (
-                <motion.button
+                <button
                   key={cat.id}
                   type="button"
-                  whileTap={TACTILE_PILL_TAP}
                   onClick={() => setCategory(cat.id)}
                   aria-pressed={isActive}
-                  className={`relative min-h-9 shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-medium transition-colors sm:min-h-0 ${
+                  className={`tactile-press relative min-h-9 shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-medium transition-colors sm:min-h-0 ${
                     isActive
                       ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
                       : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
@@ -112,7 +114,7 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
                     />
                   )}
                   <span className="relative z-10">{cat.label}</span>
-                </motion.button>
+                </button>
               );
             })}
           </div>
@@ -151,13 +153,11 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
           {filtered.map((item) => {
             const isHidden = Boolean(item.definition.secret && !item.unlocked);
             return (
-              <motion.button
+              <button
                 key={item.definition.id}
                 type="button"
-                whileTap={TACTILE_TAP}
-                transition={SPRING_TACTILE}
                 onClick={() => onInspectAchievement(item)}
-                className={`folio-sheet flex items-start gap-4 p-4 text-left transition-colors ${
+                className={`folio-sheet tactile-press flex items-start gap-4 p-4 text-left ${
                   item.unlocked
                     ? 'border-[color-mix(in_oklab,var(--color-accent)_48%,var(--border-subtle))] hover:border-[var(--color-accent)]'
                     : 'opacity-85 hover:border-[var(--border-strong)] hover:opacity-100'
@@ -218,7 +218,7 @@ export const AchievementsView: React.FC<AchievementsViewProps> = ({
                     </div>
                   )}
                 </div>
-              </motion.button>
+              </button>
             );
           })}
         </div>

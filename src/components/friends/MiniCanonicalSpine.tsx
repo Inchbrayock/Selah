@@ -13,7 +13,7 @@ interface MiniCanonicalSpineProps {
  * Compact 66-book proportional progress ribbon mirroring CanonicalSpineBar
  * in Selah's mineral division pigments.
  */
-export const MiniCanonicalSpine: React.FC<MiniCanonicalSpineProps> = ({
+export const MiniCanonicalSpine: React.FC<MiniCanonicalSpineProps> = React.memo(({
   bookProgressSpec,
   interactive = false,
   heightClassName,
@@ -134,4 +134,5 @@ export const MiniCanonicalSpine: React.FC<MiniCanonicalSpineProps> = ({
       )}
     </div>
   );
-};
+});
+MiniCanonicalSpine.displayName = 'MiniCanonicalSpine';

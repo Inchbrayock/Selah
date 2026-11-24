@@ -1,7 +1,7 @@
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Award, BookOpen, Home, ScrollText, User, Users } from 'lucide-react';
-import { SPRING_DOCK, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
+import { SPRING_DOCK } from '../../lib/motion';
 import {
   type CloudSyncStatus,
   useAccountSync,
@@ -43,7 +43,7 @@ const NAV_ITEMS: {
   { id: 'friends', label: 'Friends', icon: Users },
 ];
 
-export const AppHeader: React.FC<AppHeaderProps> = ({
+export const AppHeader: React.FC<AppHeaderProps> = React.memo(({
   activeTab,
   onSelectTab,
   onOpenAccount,
@@ -112,7 +112,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       {/* Keep blur surface on a non-ancestor layer so mobile `position: fixed` bottom dock attaches to viewport */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10 border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-canvas)_94%,transparent)] backdrop-blur-md"
+        className="pointer-events-none absolute inset-0 -z-10 border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-canvas)_96%,transparent)] backdrop-blur-xs"
       />
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-3.5 py-2.5 sm:px-6 lg:gap-4 lg:py-0">
         {/* Wordmark */}
@@ -139,7 +139,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         {/* Responsive Editorial Navigation (Floating bottom pill on < lg, Top inline on lg+) */}
         <nav
           aria-label="Primary"
-          className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 mx-auto max-w-lg rounded-full border border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_88%,transparent)] p-1.5 shadow-[0_12px_32px_-8px_rgba(12,16,24,0.22),0_2px_8px_-2px_rgba(12,16,24,0.1)] backdrop-blur-lg lg:static lg:inset-auto lg:z-auto lg:mx-0 lg:max-w-none lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none"
+          className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 mx-auto max-w-lg rounded-full border border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_95%,transparent)] p-1.5 shadow-[0_10px_28px_-8px_rgba(12,16,24,0.2),0_2px_6px_-2px_rgba(12,16,24,0.08)] backdrop-blur-sm lg:static lg:inset-auto lg:z-auto lg:mx-0 lg:max-w-none lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none"
         >
           <div className="relative grid grid-cols-5 lg:flex lg:items-center lg:gap-1">
             {/* Horizontal-only active pill slide on < lg (avoids layoutId projection jumps when window.scrollY resets) */}
@@ -173,13 +173,12 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
               const isActive = activeTab === item.id;
               const showFriendsBadge = item.id === 'friends' && friendsAttentionCount > 0;
               return (
-                <motion.button
+                <button
                   key={item.id}
                   ref={(el) => {
                     tabButtonRefs.current[item.id] = el;
                   }}
                   type="button"
-                  whileTap={TACTILE_PILL_TAP}
                   onClick={() => onSelectTab(item.id)}
                   title={
                     showFriendsBadge
@@ -187,24 +186,24 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                       : undefined
                   }
                   aria-current={isActive ? 'page' : undefined}
-                  className={`relative flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-full px-0.5 py-1.5 text-[0.64rem] font-medium leading-tight transition-colors sm:px-1 sm:text-xs lg:min-h-0 lg:flex-row lg:gap-1.5 lg:rounded-none lg:whitespace-nowrap lg:px-2.5 lg:py-4 lg:text-sm xl:gap-2 xl:px-3 ${
+                  className={`tactile-press relative flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-full px-0.5 py-1.5 text-[0.64rem] font-medium leading-tight sm:px-1 sm:text-xs lg:min-h-0 lg:flex-row lg:gap-1.5 lg:rounded-none lg:whitespace-nowrap lg:px-2.5 lg:py-4 lg:text-sm xl:gap-2 xl:px-3 ${
                     isActive
                       ? 'text-[var(--text-primary)]'
                       : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                   }`}
                 >
-                  <motion.span
+                  <span
                     aria-hidden="true"
-                    animate={isActive ? { y: -1, scale: 1.08 } : { y: 0, scale: 1 }}
-                    transition={SPRING_DOCK}
-                    className="inline-flex items-center justify-center"
+                    className={`inline-flex items-center justify-center transition-transform duration-150 ${
+                      isActive ? '-translate-y-px scale-105' : ''
+                    }`}
                   >
                     <Icon
                       className={`h-[1.15rem] w-[1.15rem] shrink-0 transition-colors lg:h-4 lg:w-4 ${
                         isActive ? 'text-[var(--color-accent)]' : 'text-[var(--text-secondary)]'
                       }`}
                     />
-                  </motion.span>
+                  </span>
                   {item.shortLabel ? (
                     <>
                       <span aria-hidden="true" className="truncate sm:hidden">
@@ -226,7 +225,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                       {friendsAttentionCount > 9 ? '9+' : friendsAttentionCount}
                     </span>
                   )}
-                </motion.button>
+                </button>
               );
             })}
           </div>
@@ -234,10 +233,9 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
         {/* Actions */}
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 lg:py-3">
-          <motion.button
+          <button
             ref={accountButtonRef}
             type="button"
-            whileTap={TACTILE_TAP}
             onClick={onOpenAccount}
             disabled={authLoading}
             title={accountTitle}
@@ -246,14 +244,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             aria-label={accountAriaLabel}
             className={
               user
-                ? `group relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all disabled:opacity-60 sm:h-9 sm:w-9 ${
+                ? `tactile-press group relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full disabled:opacity-60 sm:h-9 sm:w-9 ${
                     profileMenuHighlighted
                       ? 'ring-2 ring-[var(--color-accent)] ring-offset-2 ring-offset-[var(--bg-canvas)]'
                       : ''
                   }`
                 : authLoading
                   ? 'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] opacity-70 sm:h-9 sm:w-9'
-                  : 'inline-flex min-h-10 min-w-10 items-center justify-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-sm font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)] disabled:opacity-60 sm:min-h-9 sm:min-w-0 sm:px-3'
+                  : 'tactile-press inline-flex min-h-10 min-w-10 items-center justify-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-sm font-medium text-[var(--text-primary)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)] disabled:opacity-60 sm:min-h-9 sm:min-w-0 sm:px-3'
             }
           >
             {user ? (
@@ -282,9 +280,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                 <span className="hidden sm:inline">Sign in</span>
               </>
             )}
-          </motion.button>
+          </button>
         </div>
       </div>
     </header>
   );
-};
+});
+AppHeader.displayName = 'AppHeader';

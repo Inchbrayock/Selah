@@ -84,7 +84,11 @@ const SpineSegment = React.memo<SpineSegmentProps>(
 );
 SpineSegment.displayName = 'SpineSegment';
 
-export const CanonicalSpineBar: React.FC<CanonicalSpineBarProps> = ({ onOpenBook }) => {
+const BOOKS_BY_DIVISION: Record<BibleDivision, CanonBook[]> = Object.fromEntries(
+  DIVISIONS.map((div) => [div.id, BIBLE_BOOKS.filter((b) => b.division === div.id)])
+) as Record<BibleDivision, CanonBook[]>;
+
+export const CanonicalSpineBar: React.FC<CanonicalSpineBarProps> = React.memo(({ onOpenBook }) => {
   const { summary } = useReadingData();
   const [hoveredBook, setHoveredBook] = useState<CanonBook | null>(null);
   const [hoveredDivision, setHoveredDivision] = useState<BibleDivision | null>(null);
@@ -92,7 +96,7 @@ export const CanonicalSpineBar: React.FC<CanonicalSpineBarProps> = ({ onOpenBook
 
   const divisionStats = useMemo(() => {
     return DIVISIONS.map((div) => {
-      const books = BIBLE_BOOKS.filter((b) => b.division === div.id);
+      const books = BOOKS_BY_DIVISION[div.id];
       let read = 0;
       let total = 0;
       for (const b of books) {
@@ -252,4 +256,5 @@ export const CanonicalSpineBar: React.FC<CanonicalSpineBarProps> = ({ onOpenBook
       </div>
     </div>
   );
-};
+});
+CanonicalSpineBar.displayName = 'CanonicalSpineBar';

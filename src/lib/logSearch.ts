@@ -68,8 +68,17 @@ interface DateSearchInfo {
   day: number | null;
 }
 
+const dateSearchInfoCache = new Map<string, DateSearchInfo>();
+const MAX_DATE_SEARCH_CACHE = 1024;
+const bookAliasesCache = new Map<string, string[]>();
+const indexedLogCache = new WeakMap<ReadingLogEntry, IndexedReadingLog>();
+
 function buildDateSearchInfo(isoDate: string): DateSearchInfo {
+  const cached = dateSearchInfoCache.get(isoDate);
+  if (cached) return cached;
+
   const normalizedIso = normalizeSearchText(isoDate);
+  let info: DateSearchInfo;
   try {
     const plain = parsePlainDate(isoDate);
     const monthIdx = plain.month - 1;
@@ -107,28 +116,38 @@ function buildDateSearchInfo(isoDate: string): DateSearchInfo {
       texts.add(`${dd} ${mon} ${y}`);
     }
 
-    return {
+    info = {
       texts: [...texts],
       month: plain.month,
       day: plain.day,
     };
   } catch {
-    return {
+    info = {
       texts: normalizedIso ? [normalizedIso] : [],
       month: null,
       day: null,
     };
   }
+
+  if (dateSearchInfoCache.size >= MAX_DATE_SEARCH_CACHE) {
+    dateSearchInfoCache.clear();
+  }
+  dateSearchInfoCache.set(isoDate, info);
+  return info;
 }
 
 function getBookAliases(book: CanonBook | undefined): string[] {
   if (!book) return [];
+  const cached = bookAliasesCache.get(book.id);
+  if (cached) return cached;
   const aliases = [
     normalizeSearchText(book.name),
     normalizeSearchText(book.shortName),
     ...(BOOK_EXTRA_ALIASES[book.id] ?? []),
   ];
-  return [...new Set(aliases.filter(Boolean))];
+  const unique = [...new Set(aliases.filter(Boolean))];
+  bookAliasesCache.set(book.id, unique);
+  return unique;
 }
 
 type QueryToken =
@@ -235,7 +254,11 @@ export function indexReadingLogForSearch(
   log: ReadingLogEntry,
   book: CanonBook | undefined
 ): IndexedReadingLog {
-  return {
+  const cached = indexedLogCache.get(log);
+  if (cached && (!book || cached.log.bookId === book.id)) {
+    return cached;
+  }
+  const indexed: IndexedReadingLog = {
     log,
     bookAliases: getBookAliases(book),
     chapterSet: new Set(log.chapters),
@@ -243,6 +266,10 @@ export function indexReadingLogForSearch(
     noteText: log.note ? normalizeSearchText(log.note) : '',
     dateInfo: buildDateSearchInfo(log.readDate),
   };
+  if (book && log.bookId === book.id) {
+    indexedLogCache.set(log, indexed);
+  }
+  return indexed;
 }
 
 export interface CompiledLogSearchQuery {

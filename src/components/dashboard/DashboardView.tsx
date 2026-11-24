@@ -380,50 +380,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </p>
             ) : (
               <ul className="mt-2 divide-y divide-[var(--border-subtle)]/70">
-                <AnimatePresence initial={false}>
-                  {recentLogs.map((log) => {
-                    const book = BOOKS_BY_ID[log.bookId];
-                    if (!book) return null;
-                    const divMeta = DIVISION_META_BY_ID[book.division];
-                    return (
-                      <motion.li
-                        key={log.id}
-                        layout
-                        initial={{ opacity: 0, y: -8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.22, ease: FOLIO_EASE }}
+                {recentLogs.map((log) => {
+                  const book = BOOKS_BY_ID[log.bookId];
+                  if (!book) return null;
+                  const divMeta = DIVISION_META_BY_ID[book.division];
+                  return (
+                    <li key={log.id}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenBook(book.id)}
+                        className="tactile-press group -mx-2 flex w-[calc(100%+1rem)] items-start gap-3 rounded-md px-2 py-2.5 text-left transition-colors hover:bg-[var(--bg-surface)]/70"
                       >
-                        <button
-                          type="button"
-                          onClick={() => onOpenBook(book.id)}
-                          className="tactile-press group -mx-2 flex w-[calc(100%+1rem)] items-start gap-3 rounded-md px-2 py-2.5 text-left transition-colors hover:bg-[var(--bg-surface)]/70"
-                        >
-                          <span
-                            aria-hidden="true"
-                            className="mt-1 h-4 w-1 shrink-0 rounded-full"
-                            style={{ backgroundColor: divMeta.colorVar }}
-                          />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-baseline justify-between gap-3">
-                              <span className="truncate text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--color-accent)]">
-                                {book.name} {formatChapterRanges(log.chapters)}
-                              </span>
-                              <span className="shrink-0 text-xs text-[var(--text-secondary)] tabular-nums">
-                                {formatPlainDate(log.readDate, { month: 'short', day: 'numeric' })}
-                              </span>
-                            </div>
-                            {log.note ? (
-                              <p className="mt-0.5 line-clamp-1 font-display text-xs italic text-[var(--text-secondary)]">
-                                “{log.note}”
-                              </p>
-                            ) : null}
+                        <span
+                          aria-hidden="true"
+                          className="mt-1 h-4 w-1 shrink-0 rounded-full"
+                          style={{ backgroundColor: divMeta.colorVar }}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="truncate text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--color-accent)]">
+                              {book.name} {formatChapterRanges(log.chapters)}
+                            </span>
+                            <span className="shrink-0 text-xs text-[var(--text-secondary)] tabular-nums">
+                              {formatPlainDate(log.readDate, { month: 'short', day: 'numeric' })}
+                            </span>
                           </div>
-                        </button>
-                      </motion.li>
-                    );
-                  })}
-                </AnimatePresence>
+                          {log.note ? (
+                            <p className="mt-0.5 line-clamp-1 font-display text-xs italic text-[var(--text-secondary)]">
+                              “{log.note}”
+                            </p>
+                          ) : null}
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>

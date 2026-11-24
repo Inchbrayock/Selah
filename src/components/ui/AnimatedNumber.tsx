@@ -32,10 +32,14 @@ export const AnimatedNumber: React.FC<AnimatedNumberProps> = ({
     prevValueRef.current = value;
   }, [value]);
 
+  if (!didChange) {
+    return <span className={`inline-block ${className}`}>{children}</span>;
+  }
+
   return (
     <motion.span
       key={String(value)}
-      initial={didChange ? { y: direction * 7, opacity: 0.25, scale: 1.05 } : false}
+      initial={{ y: direction * 7, opacity: 0.25, scale: 1.05 }}
       animate={{ y: 0, opacity: 1, scale: 1 }}
       transition={SPRING_TACTILE}
       className={`inline-block ${className}`}

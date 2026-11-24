@@ -1,6 +1,4 @@
 import React from 'react';
-import { motion } from 'motion/react';
-import { SPRING_TACTILE, TACTILE_PILL_TAP } from '../../lib/motion';
 import type { PlanDayStatus, PlanStage } from '../../lib/plans';
 import type { ReadingLogEntry, ReadingPlan } from '../../types/bible';
 
@@ -15,7 +13,7 @@ interface PlanJourneyMatrixProps {
   onSelectDay: (dayNumber: number, stageIndex: number) => void;
 }
 
-export const PlanJourneyMatrix: React.FC<PlanJourneyMatrixProps> = ({
+export const PlanJourneyMatrix: React.FC<PlanJourneyMatrixProps> = React.memo(({
   plan,
   stages,
   selectedStageIndex,
@@ -58,16 +56,14 @@ export const PlanJourneyMatrix: React.FC<PlanJourneyMatrixProps> = ({
     const sizeClass = fillCell ? 'h-9 w-full sm:h-8' : 'h-9 w-9 sm:h-8 sm:w-8';
 
     return (
-      <motion.button
+      <button
         key={dayNum}
         type="button"
-        whileTap={TACTILE_PILL_TAP}
-        transition={SPRING_TACTILE}
         onClick={() => onSelectDay(dayNum, stageIdx)}
         aria-pressed={isSelected}
         aria-label={`Day ${dayNum}: ${status.day.title}, ${statusWord}${hasNotes ? ', has reflection note' : ''}`}
         title={`Day ${dayNum}: ${status.day.title}`}
-        className={`relative inline-flex ${sizeClass} items-center justify-center rounded-[5px] border text-xs font-medium tabular-nums transition-colors ${stateClass} ${
+        className={`tactile-press relative inline-flex ${sizeClass} items-center justify-center rounded-[5px] border text-xs font-medium tabular-nums ${stateClass} ${
           isSelected
             ? 'ring-2 ring-[var(--text-primary)] ring-offset-1 ring-offset-[var(--bg-elevated)]'
             : ''
@@ -80,7 +76,7 @@ export const PlanJourneyMatrix: React.FC<PlanJourneyMatrixProps> = ({
             className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-[var(--color-lamp)]"
           />
         )}
-      </motion.button>
+      </button>
     );
   };
 
@@ -217,4 +213,5 @@ export const PlanJourneyMatrix: React.FC<PlanJourneyMatrixProps> = ({
       )}
     </section>
   );
-};
+});
+PlanJourneyMatrix.displayName = 'PlanJourneyMatrix';

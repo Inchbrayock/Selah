@@ -206,27 +206,25 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onOpenBook }) => {
 
                 {/* Division Chips (horizontal scroll rail on mobile, wrap on sm+) */}
                 <div className="no-scrollbar -mx-3.5 flex flex-nowrap gap-1.5 overflow-x-auto px-3.5 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
-                  <motion.button
+                  <button
                     type="button"
-                    whileTap={TACTILE_PILL_TAP}
                     onClick={() => setDivision('ALL')}
                     aria-pressed={division === 'ALL'}
-                    className={`relative min-h-9 shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-medium transition-colors sm:min-h-0 sm:px-2.5 sm:py-1 ${
+                    className={`tactile-press relative min-h-9 shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-medium transition-colors sm:min-h-0 sm:px-2.5 sm:py-1 ${
                       division === 'ALL'
                         ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
                         : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     All sections
-                  </motion.button>
+                  </button>
                   {availableDivisions.map((div) => (
-                    <motion.button
+                    <button
                       key={div.id}
                       type="button"
-                      whileTap={TACTILE_PILL_TAP}
                       onClick={() => setDivision(div.id)}
                       aria-pressed={division === div.id}
-                      className={`inline-flex min-h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-medium transition-colors sm:min-h-0 sm:px-2.5 sm:py-1 ${
+                      className={`tactile-press inline-flex min-h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-medium transition-colors sm:min-h-0 sm:px-2.5 sm:py-1 ${
                         division === div.id
                           ? 'border-[var(--text-primary)] bg-[var(--bg-elevated)] text-[var(--text-primary)]'
                           : 'border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
@@ -238,7 +236,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onOpenBook }) => {
                         style={{ backgroundColor: div.colorVar }}
                       />
                       {div.shortLabel}
-                    </motion.button>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -248,37 +246,20 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onOpenBook }) => {
       </section>
 
       {viewMode === 'mosaic' ? (
-        <motion.div
-          key="mosaic"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: FOLIO_EASE }}
-        >
+        <div key="mosaic">
           <WholeBibleMosaic onSelectBook={onOpenBook} />
-        </motion.div>
+        </div>
       ) : filteredBooks.length === 0 ? (
-        <motion.div
-          key="empty-books"
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.18, ease: FOLIO_EASE }}
-          className="folio-sheet p-10 text-center"
-        >
+        <div key="empty-books" className="folio-sheet p-10 text-center">
           <p className="font-display text-xl font-medium text-[var(--text-primary)]">
             No matching books found
           </p>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
             Clear your search or choose another status filter.
           </p>
-        </motion.div>
+        </div>
       ) : (
-        <motion.div
-          key="bookshelf"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: FOLIO_EASE }}
-          className="space-y-10"
-        >
+        <div key="bookshelf" className="space-y-10">
             {otFiltered.length > 0 && (
               <section aria-labelledby="ot-section-heading">
                 <div className="mb-4 flex items-baseline justify-between border-b border-[var(--border-subtle)] pb-2">
@@ -328,7 +309,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onOpenBook }) => {
                 </div>
               </section>
             )}
-          </motion.div>
+          </div>
         )}
     </div>
   );
