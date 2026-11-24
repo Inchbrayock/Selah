@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Settings,
   UserCheck,
+  Users,
   X,
 } from 'lucide-react';
 import { SPRING_TACTILE, TACTILE_PILL_TAP, TACTILE_TAP } from '../../lib/motion';
@@ -29,6 +30,7 @@ import { GuestMergeCard } from './GuestMergeCard';
 interface AccountDialogProps {
   open: boolean;
   onClose: () => void;
+  onOpenFriends?: () => void;
   onOpenSettings?: () => void;
   onEditPhoto?: () => void;
   anchorRef?: React.RefObject<HTMLElement | null>;
@@ -98,6 +100,7 @@ const GoogleMark: React.FC = () => (
 
 const AccountDialogPanel: React.FC<Omit<AccountDialogProps, 'open'>> = ({
   onClose,
+  onOpenFriends,
   onOpenSettings,
   onEditPhoto,
   anchorRef,
@@ -120,7 +123,13 @@ const AccountDialogPanel: React.FC<Omit<AccountDialogProps, 'open'>> = ({
     resolveGuestMerge,
     syncNow,
   } = useAccountSync();
-  const { ownFriendProfile } = useFriendsStore();
+  const {
+    ownFriendProfile,
+    friends,
+    incomingRequests,
+    unreadEncouragementsCount,
+    sharedPlans,
+  } = useFriendsStore();
 
   const [mode, setMode] = useState<AuthMode>('signin');
   const [email, setEmail] = useState('');
@@ -197,6 +206,39 @@ const AccountDialogPanel: React.FC<Omit<AccountDialogProps, 'open'>> = ({
   }, [editingName, user?.displayName]);
 
   const unlockedCount = achievements.filter((a) => a.unlocked).length;
+  const pendingInvitesCount = sharedPlans.filter(
+    (sp) => sp.myMembership?.status === 'invited'
+  ).length;
+  const friendsAttentionCount = user
+    ? incomingRequests.length + unreadEncouragementsCount + pendingInvitesCount
+    : 0;
+
+  const friendsRowSubtitle = (() => {
+    if (!user) return 'Sign in to connect & read plans together';
+    if (friendsAttentionCount > 0) {
+      const parts: string[] = [];
+      if (incomingRequests.length > 0) {
+        parts.push(
+          `${incomingRequests.length} ${incomingRequests.length === 1 ? 'request' : 'requests'}`
+        );
+      }
+      if (unreadEncouragementsCount > 0) {
+        parts.push(
+          `${unreadEncouragementsCount} ${unreadEncouragementsCount === 1 ? 'note' : 'notes'}`
+        );
+      }
+      if (pendingInvitesCount > 0) {
+        parts.push(
+          `${pendingInvitesCount} plan ${pendingInvitesCount === 1 ? 'invite' : 'invites'}`
+        );
+      }
+      return parts.join(' · ');
+    }
+    if (friends.length > 0) {
+      return `${friends.length} ${friends.length === 1 ? 'friend' : 'friends'} · Progress & shared plans`;
+    }
+    return 'Find friends & read plans together';
+  })();
 
   const runProviderSignIn = async (
     signInFn: () => Promise<void>,
@@ -761,34 +803,70 @@ const AccountDialogPanel: React.FC<Omit<AccountDialogProps, 'open'>> = ({
             </>
           )}
 
-          {onOpenSettings && (
+          {(onOpenFriends || onOpenSettings) && (
             <div className="space-y-2 border-t border-[var(--border-subtle)] pt-3">
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onOpenSettings();
-                }}
-                className="group flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3.5 py-2.5 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)]"
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[var(--bg-surface)] text-[var(--text-secondary)] transition-colors group-hover:text-[var(--color-accent)]">
-                    <Settings className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-[var(--text-primary)]">
-                      Settings
+              {onOpenFriends && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenFriends();
+                  }}
+                  className="group flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3.5 py-2.5 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)]"
+                >
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[var(--bg-surface)] text-[var(--text-secondary)] transition-colors group-hover:text-[var(--color-accent)]">
+                      <Users className="h-4 w-4" aria-hidden="true" />
                     </span>
-                    <span className="block truncate text-xs text-[var(--text-secondary)]">
-                      Theme, streak rules, privacy &amp; backup
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2 text-sm font-medium text-[var(--text-primary)]">
+                        <span>Friends</span>
+                        {friendsAttentionCount > 0 && (
+                          <span className="rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[0.65rem] font-semibold leading-none text-white tabular-nums">
+                            {friendsAttentionCount}
+                          </span>
+                        )}
+                      </span>
+                      <span className="block truncate text-xs text-[var(--text-secondary)]">
+                        {friendsRowSubtitle}
+                      </span>
                     </span>
                   </span>
-                </span>
-                <ChevronRight
-                  className="h-4 w-4 shrink-0 text-[var(--text-secondary)] transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--text-primary)]"
-                  aria-hidden="true"
-                />
-              </button>
+                  <ChevronRight
+                    className="h-4 w-4 shrink-0 text-[var(--text-secondary)] transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--text-primary)]"
+                    aria-hidden="true"
+                  />
+                </button>
+              )}
+
+              {onOpenSettings && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenSettings();
+                  }}
+                  className="group flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3.5 py-2.5 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)]"
+                >
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[var(--bg-surface)] text-[var(--text-secondary)] transition-colors group-hover:text-[var(--color-accent)]">
+                      <Settings className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-[var(--text-primary)]">
+                        Settings
+                      </span>
+                      <span className="block truncate text-xs text-[var(--text-secondary)]">
+                        Theme, streak rules, privacy &amp; backup
+                      </span>
+                    </span>
+                  </span>
+                  <ChevronRight
+                    className="h-4 w-4 shrink-0 text-[var(--text-secondary)] transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--text-primary)]"
+                    aria-hidden="true"
+                  />
+                </button>
+              )}
             </div>
           )}
 
@@ -816,6 +894,7 @@ const AccountDialogPanel: React.FC<Omit<AccountDialogProps, 'open'>> = ({
 export const AccountDialog: React.FC<AccountDialogProps> = ({
   open,
   onClose,
+  onOpenFriends,
   onOpenSettings,
   onEditPhoto,
   anchorRef,
@@ -826,6 +905,7 @@ export const AccountDialog: React.FC<AccountDialogProps> = ({
         <AccountDialogPanel
           key="account-popover"
           onClose={onClose}
+          onOpenFriends={onOpenFriends}
           onOpenSettings={onOpenSettings}
           onEditPhoto={onEditPhoto}
           anchorRef={anchorRef}

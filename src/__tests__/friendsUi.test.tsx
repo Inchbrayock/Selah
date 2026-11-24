@@ -227,9 +227,13 @@ function emitAuth(user: AccountUser | null) {
   }
 }
 
-async function openFriendsFromNav() {
-  const nav = await screen.findByRole('navigation', { name: 'Primary' });
-  fireEvent.click(within(nav).getByRole('button', { name: /^Friends$/i }));
+async function openFriendsFromAccountMenu() {
+  const accountBtn = await screen.findByRole('button', {
+    name: /Open profile menu|Sign in or open account menu/i,
+  });
+  fireEvent.click(accountBtn);
+  const popover = await screen.findByTestId('account-popover');
+  fireEvent.click(within(popover).getByRole('button', { name: /Friends/i }));
   expect(await screen.findByRole('heading', { level: 1, name: /^Friends$/i })).toBeInTheDocument();
 }
 
@@ -266,25 +270,21 @@ describe('Friends hub UI and social discovery workflows', () => {
     });
   });
 
-  it('opens Friends directly from the primary navigation bar (5 tabs) and omits Friends from the account popover', async () => {
+  it('opens Friends via the account menu while signed out, has no standalone header Friends icon, and keeps 4 primary tabs', async () => {
     render(<App />);
 
-    const nav = await screen.findByRole('navigation', { name: 'Primary' });
-    const navButtons = nav.querySelectorAll('button');
-    expect(navButtons).toHaveLength(5);
-    expect(within(nav).getByRole('button', { name: /^Friends$/i })).toBeInTheDocument();
+    // No standalone Friends button in the top bar or primary nav
+    const header = document.querySelector('header')!;
+    expect(within(header).queryByRole('button', { name: /Reading Circle|Friends/i })).not.toBeInTheDocument();
 
-    // Account popover focuses on Account & Settings rather than Friends
-    fireEvent.click(screen.getByRole('button', { name: /Sign in or open account menu/i }));
-    const popover = await screen.findByTestId('account-popover');
-    expect(within(popover).queryByRole('button', { name: /Friends/i })).not.toBeInTheDocument();
-    fireEvent.click(within(popover).getByRole('button', { name: /Close account menu/i }));
-
-    await openFriendsFromNav();
+    await openFriendsFromAccountMenu();
 
     expect(screen.getByRole('heading', { name: 'Sign in to read alongside friends' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in to connect' })).toBeInTheDocument();
     expect(screen.queryByText(/friend code/i)).not.toBeInTheDocument();
+
+    const navButtons = screen.getByRole('navigation', { name: 'Primary' }).querySelectorAll('button');
+    expect(navButtons).toHaveLength(4);
   });
 
   it('shows own @username with copy & inline edit in Friends, searches without random strangers, and manages username in Settings', async () => {
@@ -303,7 +303,7 @@ describe('Friends hub UI and social discovery workflows', () => {
       expect(friendsMocks.subscribeFriendships).toHaveBeenCalled();
     });
 
-    await openFriendsFromNav();
+    await openFriendsFromAccountMenu();
 
     // Own profile bar exposes @hannah, Copy button, Edit username, and Privacy right in Friends
     expect(await screen.findByText('@hannah')).toBeInTheDocument();
@@ -455,9 +455,9 @@ describe('Friends hub UI and social discovery workflows', () => {
       friendsSyncState.onFriendshipsCb?.([incomingFromMiriam, outgoingToLuke], false);
     });
 
-    // Friends tab attention badge reflects the incoming request (not the profile picture)
-    expect(await screen.findByTestId('friends-attention-badge')).toHaveTextContent('1');
-    expect(screen.queryByTestId('profile-attention-badge')).not.toBeInTheDocument();
+    // Unified profile attention badge reflects the incoming request
+    expect(await screen.findByTestId('profile-attention-badge')).toHaveTextContent('1');
+    expect(screen.queryByTestId('friends-attention-badge')).not.toBeInTheDocument();
 
     const dashboardStrip = await screen.findByRole('region', { name: 'Friends summary' });
     expect(dashboardStrip).toHaveTextContent('1 request');
@@ -598,7 +598,7 @@ describe('Friends hub UI and social discovery workflows', () => {
       friendsSyncState.onFriendshipsCb?.([incomingSpam], false);
     });
 
-    await openFriendsFromNav();
+    await openFriendsFromAccountMenu();
     fireEvent.click(screen.getByRole('tab', { name: /Find & Requests/i }));
 
     const requestBlockButton = await screen.findByRole(
@@ -675,7 +675,7 @@ describe('Friends hub UI and social discovery workflows', () => {
       expect(friendsMocks.subscribeFriendships).toHaveBeenCalled();
     });
 
-    await openFriendsFromNav();
+    await openFriendsFromAccountMenu();
 
     await act(async () => {
       resolveLateCache({
@@ -718,7 +718,7 @@ describe('Friends hub UI and social discovery workflows', () => {
       expect(friendsMocks.subscribeFriendships).toHaveBeenCalledTimes(1);
     });
 
-    await openFriendsFromNav();
+    await openFriendsFromAccountMenu();
 
     await act(async () => {
       friendsSyncState.onFriendshipsErrCb?.(new Error('Transient connection lost'));
@@ -736,7 +736,7 @@ describe('Friends hub UI and social discovery workflows', () => {
     });
   });
 
-  it('transitions signed-out to signed-in smoothly, shows @username in Account popover, and skips redundant directory writes on chapter log', async () => {
+  it('transitions signed-out to signed-in smoothly, shows @username & Friends row in Account popover, and skips redundant directory writes on chapter log', async () => {
     render(<App />);
 
     await act(async () => {
@@ -750,7 +750,7 @@ describe('Friends hub UI and social discovery workflows', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Open profile menu/i }));
     const popover = await screen.findByTestId('account-popover');
     expect(within(popover).getByText('@hannah')).toBeInTheDocument();
-    expect(within(popover).queryByRole('button', { name: /Friends/i })).not.toBeInTheDocument();
+    expect(within(popover).getByRole('button', { name: /Friends/i })).toBeInTheDocument();
 
     // Close menu and log a chapter -> publishOwnFriendStats should be called with syncDirectory: false
     fireEvent.click(within(popover).getByRole('button', { name: /Close account menu/i }));

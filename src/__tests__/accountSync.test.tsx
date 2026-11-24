@@ -547,14 +547,13 @@ describe('Firebase Account & Cloud Sync', () => {
     ).toBeInTheDocument();
   }, 15000);
 
-  it('displays profile picture on the far right without top-bar settings button, places Friends in primary nav, and opens dedicated Settings from the popover', async () => {
+  it('displays profile picture on the far right without top-bar settings/friends buttons and opens dedicated Settings from the popover', async () => {
     render(<App />);
     expect(await screen.findByText(/Bible Progress/i)).toBeInTheDocument();
 
-    // No standalone Settings button exists in the header; Friends lives in Primary navigation
+    // No standalone Settings or Friends button exists in the header before clicking the account button
     expect(screen.queryByRole('button', { name: /Open settings|Settings/i })).not.toBeInTheDocument();
-    const primaryNav = screen.getByRole('navigation', { name: 'Primary' });
-    expect(within(primaryNav).getByRole('button', { name: /^Friends$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Open Reading Circle|Friends/i })).not.toBeInTheDocument();
     const signInBtn = screen.getByRole('button', {
       name: /Sign in or open account menu/i,
     });

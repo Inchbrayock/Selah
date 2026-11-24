@@ -477,8 +477,8 @@ describe('Shared Reading, Encouragements, and Friend Bonus Milestones', () => {
       ]);
     });
 
-    // Friends nav attention badge highlights the pending shared plan invite
-    expect(await screen.findByTestId('friends-attention-badge')).toHaveTextContent('1');
+    // Profile attention badge highlights the pending shared plan invite
+    expect(await screen.findByTestId('profile-attention-badge')).toHaveTextContent('1');
 
     expect(await screen.findByText('Thirty Days in Psalms')).toBeInTheDocument();
     expect(screen.getByText(/Invited by Miriam/i)).toBeInTheDocument();
@@ -525,11 +525,10 @@ describe('Shared Reading, Encouragements, and Friend Bonus Milestones', () => {
       ]);
     });
 
-    // Friends nav attention badge reflects unread encouragement
-    expect(await screen.findByTestId('friends-attention-badge')).toHaveTextContent('1');
+    // Profile attention badge reflects unread encouragement
+    expect(await screen.findByTestId('profile-attention-badge')).toHaveTextContent('1');
 
-    const nav = screen.getByRole('navigation', { name: 'Primary' });
-    fireEvent.click(within(nav).getByRole('button', { name: /^Friends$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Friends' }));
 
     expect(await screen.findByRole('heading', { name: 'Encouragements' })).toBeInTheDocument();
     expect(

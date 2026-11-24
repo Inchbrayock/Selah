@@ -1,6 +1,6 @@
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Award, BookOpen, Home, ScrollText, User, Users } from 'lucide-react';
+import { Award, BookOpen, Home, ScrollText, User } from 'lucide-react';
 import { SPRING_DOCK } from '../../lib/motion';
 import {
   type CloudSyncStatus,
@@ -11,8 +11,8 @@ import {
 import { ProfileAvatar } from './ProfileAvatar';
 import { SanctuaryLamp } from './SanctuaryLamp';
 
-export type PrimaryTab = 'dashboard' | 'library' | 'achievements' | 'journal' | 'friends';
-export type AppTab = PrimaryTab | 'settings';
+export type PrimaryTab = 'dashboard' | 'library' | 'achievements' | 'journal';
+export type AppTab = PrimaryTab | 'settings' | 'friends';
 
 interface AppHeaderProps {
   activeTab: AppTab;
@@ -40,7 +40,6 @@ const NAV_ITEMS: {
   { id: 'library', label: 'Books', icon: BookOpen },
   { id: 'achievements', label: 'Milestones', icon: Award },
   { id: 'journal', label: 'Journal & Plans', shortLabel: 'Journal', icon: ScrollText },
-  { id: 'friends', label: 'Friends', icon: Users },
 ];
 
 export const AppHeader: React.FC<AppHeaderProps> = React.memo(({
@@ -68,7 +67,7 @@ export const AppHeader: React.FC<AppHeaderProps> = React.memo(({
   const [underline, setUnderline] = useState<{ left: number; width: number } | null>(null);
 
   const measureDesktopUnderline = useCallback(() => {
-    if (activeTab === 'settings') {
+    if (activeTab === 'settings' || activeTab === 'friends') {
       setUnderline(null);
       return;
     }
@@ -91,11 +90,15 @@ export const AppHeader: React.FC<AppHeaderProps> = React.memo(({
 
   const accountName = user?.displayName || user?.email || 'Account';
   const accountTitle = user
-    ? `${accountName} (${SYNC_LABELS[syncStatus]})`
+    ? friendsAttentionCount > 0
+      ? `${accountName} (${SYNC_LABELS[syncStatus]} · ${friendsAttentionCount} new)`
+      : `${accountName} (${SYNC_LABELS[syncStatus]})`
     : 'Sign in or open account menu';
 
   const accountAriaLabel = user
-    ? `Open profile menu (${accountName})`
+    ? friendsAttentionCount > 0
+      ? `Open profile menu (${accountName}, ${friendsAttentionCount} new)`
+      : `Open profile menu (${accountName})`
     : 'Sign in or open account menu';
 
   const syncDotClass =
@@ -105,7 +108,8 @@ export const AppHeader: React.FC<AppHeaderProps> = React.memo(({
         ? 'bg-[var(--color-crimson)]'
         : 'bg-[var(--color-lamp)]';
 
-  const profileMenuHighlighted = accountOpen || activeTab === 'settings';
+  const profileMenuHighlighted =
+    accountOpen || activeTab === 'friends' || activeTab === 'settings';
 
   return (
     <header className="sticky top-0 z-30 pt-[env(safe-area-inset-top)]">
@@ -139,9 +143,9 @@ export const AppHeader: React.FC<AppHeaderProps> = React.memo(({
         {/* Responsive Editorial Navigation (Floating bottom pill on < lg, Top inline on lg+) */}
         <nav
           aria-label="Primary"
-          className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 mx-auto max-w-lg rounded-full border border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_95%,transparent)] p-1.5 shadow-[0_10px_28px_-8px_rgba(12,16,24,0.2),0_2px_6px_-2px_rgba(12,16,24,0.08)] backdrop-blur-sm lg:static lg:inset-auto lg:z-auto lg:mx-0 lg:max-w-none lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none"
+          className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 mx-auto max-w-md rounded-full border border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_95%,transparent)] p-1.5 shadow-[0_10px_28px_-8px_rgba(12,16,24,0.2),0_2px_6px_-2px_rgba(12,16,24,0.08)] backdrop-blur-sm lg:static lg:inset-auto lg:z-auto lg:mx-0 lg:max-w-none lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none"
         >
-          <div className="relative grid grid-cols-5 lg:flex lg:items-center lg:gap-1">
+          <div className="relative grid grid-cols-4 lg:flex lg:items-center lg:gap-1">
             {/* Horizontal-only active pill slide on < lg (avoids layoutId projection jumps when window.scrollY resets) */}
             {activeIndex >= 0 && (
               <motion.div
@@ -150,7 +154,7 @@ export const AppHeader: React.FC<AppHeaderProps> = React.memo(({
                 initial={false}
                 animate={{ x: `${activeIndex * 100}%` }}
                 transition={SPRING_DOCK}
-                className="pointer-events-none absolute inset-y-0 left-0 -z-10 w-1/5 px-0.5 lg:hidden"
+                className="pointer-events-none absolute inset-y-0 left-0 -z-10 w-1/4 px-0.5 lg:hidden"
               >
                 <span className="block h-full w-full rounded-full bg-[var(--color-accent-soft)]" />
               </motion.div>
@@ -171,7 +175,6 @@ export const AppHeader: React.FC<AppHeaderProps> = React.memo(({
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
-              const showFriendsBadge = item.id === 'friends' && friendsAttentionCount > 0;
               return (
                 <button
                   key={item.id}
@@ -180,13 +183,8 @@ export const AppHeader: React.FC<AppHeaderProps> = React.memo(({
                   }}
                   type="button"
                   onClick={() => onSelectTab(item.id)}
-                  title={
-                    showFriendsBadge
-                      ? `Friends (${friendsAttentionCount} new)`
-                      : undefined
-                  }
                   aria-current={isActive ? 'page' : undefined}
-                  className={`tactile-press relative flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-full px-0.5 py-1.5 text-[0.64rem] font-medium leading-tight sm:px-1 sm:text-xs lg:min-h-0 lg:flex-row lg:gap-1.5 lg:rounded-none lg:whitespace-nowrap lg:px-2.5 lg:py-4 lg:text-sm xl:gap-2 xl:px-3 ${
+                  className={`tactile-press relative flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-full px-1 py-1.5 text-[0.68rem] font-medium leading-tight sm:text-xs lg:min-h-0 lg:flex-row lg:gap-1.5 lg:rounded-none lg:whitespace-nowrap lg:px-2.5 lg:py-4 lg:text-sm xl:gap-2 xl:px-3 ${
                     isActive
                       ? 'text-[var(--text-primary)]'
                       : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -215,15 +213,6 @@ export const AppHeader: React.FC<AppHeaderProps> = React.memo(({
                     </>
                   ) : (
                     <span className="truncate lg:whitespace-nowrap">{item.label}</span>
-                  )}
-                  {showFriendsBadge && (
-                    <span
-                      aria-hidden="true"
-                      data-testid="friends-attention-badge"
-                      className="absolute top-1 left-1/2 flex h-4 min-w-4 translate-x-1 items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[0.58rem] font-semibold leading-none text-white tabular-nums ring-2 ring-[var(--bg-elevated)] lg:static lg:h-[1.1rem] lg:min-w-[1.1rem] lg:translate-x-0 lg:text-[0.62rem] lg:ring-0"
-                    >
-                      {friendsAttentionCount > 9 ? '9+' : friendsAttentionCount}
-                    </span>
                   )}
                 </button>
               );
@@ -262,6 +251,15 @@ export const AppHeader: React.FC<AppHeaderProps> = React.memo(({
                   textClassName="text-xs sm:text-[0.8rem]"
                   interactive
                 />
+                {friendsAttentionCount > 0 && (
+                  <span
+                    aria-hidden="true"
+                    data-testid="profile-attention-badge"
+                    className="absolute -top-1 -right-1 flex h-[1.1rem] min-w-[1.1rem] items-center justify-center rounded-full bg-[var(--color-accent)] px-1 text-[0.62rem] font-semibold leading-none text-white tabular-nums ring-2 ring-[var(--bg-canvas)]"
+                  >
+                    {friendsAttentionCount > 9 ? '9+' : friendsAttentionCount}
+                  </span>
+                )}
                 <span
                   aria-hidden="true"
                   className={`absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--bg-canvas)] ${syncDotClass} ${

@@ -29,7 +29,6 @@ const PRIMARY_TAB_LABELS: Record<PrimaryTab, string> = {
   library: 'Books',
   achievements: 'Milestones',
   journal: 'Journal & Plans',
-  friends: 'Friends',
 };
 
 const TAB_TITLES: Record<AppTab, string> = {
@@ -138,7 +137,7 @@ const SanctuaryAppContent: React.FC<{ ready: boolean }> = React.memo(({ ready })
 
   const [activeTab, setActiveTab] = useState<AppTab>(initialRoute?.tab ?? 'dashboard');
   const [returnTab, setReturnTab] = useState<PrimaryTab>(
-    initialRoute && initialRoute.tab !== 'settings'
+    initialRoute && initialRoute.tab !== 'settings' && initialRoute.tab !== 'friends'
       ? initialRoute.tab
       : 'dashboard'
   );
@@ -163,7 +162,7 @@ const SanctuaryAppContent: React.FC<{ ready: boolean }> = React.memo(({ ready })
       options?: { journalSubTab?: 'journal' | 'plans'; skipHashPush?: boolean }
     ) => {
       const nextJournalSubTab = options?.journalSubTab ?? 'journal';
-      if (nextTab === 'settings') {
+      if (nextTab === 'settings' || nextTab === 'friends') {
         setOpenBookId(null);
       } else {
         setReturnTab(nextTab);
@@ -237,7 +236,7 @@ const SanctuaryAppContent: React.FC<{ ready: boolean }> = React.memo(({ ready })
         setOpenBookId(null);
         return true;
       }
-      if (state.activeTab === 'settings') {
+      if (state.activeTab === 'settings' || state.activeTab === 'friends') {
         navigateToTab(returnTabRef.current);
         return true;
       }
@@ -275,7 +274,7 @@ const SanctuaryAppContent: React.FC<{ ready: boolean }> = React.memo(({ ready })
     () => navigateToTab('journal', { journalSubTab: 'plans' }),
     [navigateToTab]
   );
-  const handleBackFromSettings = useCallback(
+  const handleBackToReturnTab = useCallback(
     () => navigateToTab(returnTabRef.current),
     [navigateToTab]
   );
@@ -329,7 +328,7 @@ const SanctuaryAppContent: React.FC<{ ready: boolean }> = React.memo(({ ready })
             )}
             {activeTab === 'settings' && (
               <SettingsView
-                onBack={handleBackFromSettings}
+                onBack={handleBackToReturnTab}
                 backLabel={PRIMARY_TAB_LABELS[returnTab]}
                 onOpenAccount={handleOpenAccount}
                 onEditPhoto={handleOpenPhotoEditor}
@@ -338,6 +337,8 @@ const SanctuaryAppContent: React.FC<{ ready: boolean }> = React.memo(({ ready })
             )}
             {activeTab === 'friends' && (
               <FriendsView
+                onBack={handleBackToReturnTab}
+                backLabel={PRIMARY_TAB_LABELS[returnTab]}
                 onOpenAccount={handleOpenAccount}
                 onNavigateToPlan={handleOpenPlans}
               />
@@ -370,6 +371,7 @@ const SanctuaryAppContent: React.FC<{ ready: boolean }> = React.memo(({ ready })
       <AccountDialog
         open={accountOpen}
         onClose={handleCloseAccount}
+        onOpenFriends={handleOpenFriends}
         onOpenSettings={handleOpenSettings}
         onEditPhoto={handleOpenPhotoEditor}
         anchorRef={accountAnchorRef}
